@@ -53,7 +53,7 @@ async function loadTasksList() {
     const tasks = await res.json();
 
     // Update activeTaskStatus first
-    const activeTask = tasks.find(t => t.task_id === currentTaskId);
+    const activeTask = tasks.find((t) => t.task_id === currentTaskId);
     activeTaskStatus = activeTask ? activeTask.status : null;
 
     const tasksJson = JSON.stringify(tasks);
@@ -255,10 +255,11 @@ async function getTaskDetails(taskId) {
 async function pollActiveTaskState() {
   if (!currentTaskId) return;
   // Poll if the task is actively running, or if we haven't loaded it, or if the status in the sidebar differs from what we last rendered
-  const statusNeedsPoll = activeTaskStatus === "running" || 
-                          activeTaskStatus === "processando" || 
-                          activeTaskStatus !== lastRenderedStatus || 
-                          !lastTaskDetailsJson;
+  const statusNeedsPoll =
+    activeTaskStatus === "running" ||
+    activeTaskStatus === "processando" ||
+    activeTaskStatus !== lastRenderedStatus ||
+    !lastTaskDetailsJson;
   if (statusNeedsPoll) {
     await getTaskDetails(currentTaskId);
   }
@@ -275,6 +276,24 @@ function escapeHtml(text) {
 
 function renderCollapsibleText(text) {
   return `<div class="log-collapsible-text">${text}</div>`;
+}
+
+function formatOllamaUsage(usage) {
+  if (!usage || typeof usage !== "object") return "";
+  const parts = [];
+  if (Number.isInteger(usage.prompt_tokens)) {
+    parts.push(`prompt ${usage.prompt_tokens}`);
+  }
+  if (Number.isInteger(usage.completion_tokens)) {
+    parts.push(`completion ${usage.completion_tokens}`);
+  }
+  if (Number.isInteger(usage.total_tokens)) {
+    parts.push(`total ${usage.total_tokens}`);
+  }
+  if (!parts.length && usage.tokens && Number.isInteger(usage.tokens)) {
+    parts.push(`total ${usage.tokens}`);
+  }
+  return parts.length ? `Ollama: ${parts.join(" | ")}` : "";
 }
 
 function stripHtmlTags(text) {
@@ -360,9 +379,14 @@ function renderExecutionLogs(log) {
     if (entry.role === "user_intervention")
       icon = '<i class="fa-solid fa-user-pen"></i>';
 
+    const usageBadge = entry.ollama_usage
+      ? `<span class="log-usage-badge">${escapeHtml(formatOllamaUsage(entry.ollama_usage))}</span>`
+      : "";
+
     card.innerHTML = `
             <div class="log-card-header">
                 <span>${icon} ${titleRole} (Step ${entry.step || "-"})</span>
+                ${usageBadge}
             </div>
             <div class="log-card-body">
                 ${renderCardBody(entry)}

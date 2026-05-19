@@ -534,6 +534,17 @@ body {
     letter-spacing: 0.5px;
 }
 
+.log-usage-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: #0f766e;
+    background: rgba(13, 148, 136, 0.12);
+    border: 1px solid rgba(13, 148, 136, 0.18);
+    padding: 4px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
 .log-card-body {
     padding: 20px;
 }

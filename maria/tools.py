@@ -1,10 +1,61 @@
 import os
 import subprocess
+import signal
+import time
 from maria.security import is_path_safe, is_command_critical, prompt_user_approval
 
+# Track process groups for tasks so they can be terminated when a task is deleted.
+task_process_groups = {}
+
+
+def register_task_process_group(task_id: str, pgid: int):
+    if not task_id:
+        return
+    groups = task_process_groups.setdefault(task_id, set())
+    groups.add(pgid)
+
+
+def unregister_task_process_group(task_id: str, pgid: int):
+    if not task_id:
+        return
+    groups = task_process_groups.get(task_id)
+    if not groups:
+        return
+    groups.discard(pgid)
+    if not groups:
+        task_process_groups.pop(task_id, None)
+
+
+def terminate_task_process_groups(task_id: str):
+    groups = task_process_groups.pop(task_id, None)
+    if not groups:
+        return
+
+    for pgid in list(groups):
+        try:
+            if os.name == "nt":
+                os.kill(pgid, signal.SIGTERM)
+            else:
+                os.killpg(pgid, signal.SIGTERM)
+        except Exception:
+            pass
+
+    # Give processes a short grace period to exit before forcing them.
+    time.sleep(0.25)
+    for pgid in list(groups):
+        try:
+            if os.name == "nt":
+                os.kill(pgid, signal.SIGKILL)
+            else:
+                os.killpg(pgid, signal.SIGKILL)
+        except Exception:
+            pass
+
+
 class ToolExecutor:
-    def __init__(self, workspace_dir: str):
+    def __init__(self, workspace_dir: str, task_id: str = None):
         self.workspace_dir = os.path.abspath(workspace_dir)
+        self.task_id = task_id
         # Ensure workspace directory exists
         os.makedirs(self.workspace_dir, exist_ok=True)
 
@@ -90,32 +141,62 @@ class ToolExecutor:
             approved = prompt_user_approval(command)
             if not approved:
                 return "Error: Command execution rejected by user."
-                
+
+        preexec_fn = None
+        creationflags = 0
+        if os.name != "nt":
+            preexec_fn = os.setsid
+        else:
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        process = None
+        pgid = None
+        if self.task_id and os.name != "nt":
+            # On POSIX, the process PID becomes the process group ID after setsid.
+            pgid = None
+
         try:
-            # Run the command with cwd set to workspace
-            # We run in shell=True to support piping, redirects, etc.
-            # Timeout of 60s to prevent hanging
-            process = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 shell=True,
                 cwd=self.workspace_dir,
                 text=True,
-                capture_output=True,
-                timeout=300
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=preexec_fn,
+                creationflags=creationflags,
             )
-            
+
+            if self.task_id:
+                pgid = process.pid
+                register_task_process_group(self.task_id, pgid)
+
+            stdout, stderr = process.communicate(timeout=300)
             output = ""
-            if process.stdout:
-                output += process.stdout
-            if process.stderr:
-                output += f"\nStderr:\n{process.stderr}"
-                
+            if stdout:
+                output += stdout
+            if stderr:
+                output += f"\nStderr:\n{stderr}"
+
             if process.returncode != 0:
                 return f"Error: Command exited with code {process.returncode}.\nOutput:\n{output.strip()}"
-            
+
             return f"Success: Command executed successfully.\nOutput:\n{output.strip()}"
-            
+
         except subprocess.TimeoutExpired:
+            if process is not None:
+                try:
+                    if pgid is not None:
+                        if os.name == "nt":
+                            process.send_signal(signal.CTRL_BREAK_EVENT)
+                        else:
+                            os.killpg(pgid, signal.SIGTERM)
+                    process.kill()
+                except Exception:
+                    pass
             return "Error: Command timed out after 300 seconds."
         except Exception as e:
             return f"Error: Failed to run command: {e}"
+        finally:
+            if self.task_id and pgid is not None:
+                unregister_task_process_group(self.task_id, pgid)

@@ -1,4 +1,6 @@
 import json
+import os
+import threading
 from unittest.mock import MagicMock
 
 import server
@@ -38,7 +40,9 @@ def test_resume_auto_starts_background_loop(monkeypatch, tmp_path):
     monkeypatch.setattr(server.threading, "Thread", DummyThread)
 
     client = server.app.test_client()
-    response = client.post(f"/api/tasks/{task_id}/action", json={"action": "resume_auto"})
+    response = client.post(
+        f"/api/tasks/{task_id}/action", json={"action": "resume_auto"}
+    )
 
     assert response.status_code == 200
     data = response.get_json()
@@ -64,11 +68,57 @@ def test_resume_auto_rejects_non_auto_mode(monkeypatch, tmp_path):
         json.dump(state, f)
 
     client = server.app.test_client()
-    response = client.post(f"/api/tasks/{task_id}/action", json={"action": "resume_auto"})
+    response = client.post(
+        f"/api/tasks/{task_id}/action", json={"action": "resume_auto"}
+    )
 
     assert response.status_code == 400
     data = response.get_json()
     assert data["error"] == "Task is not in auto mode"
+
+
+def test_delete_task_stops_background_thread_and_cleans_up(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "active_threads", {})
+    monkeypatch.setattr(server, "task_stop_events", {})
+
+    task_id = "task_test"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+    with open(task_path / "task_state.json", "w", encoding="utf-8") as f:
+        json.dump({"task_id": task_id}, f)
+
+    terminated = {"called": False}
+
+    def fake_terminate(task_id_arg):
+        terminated["called"] = task_id_arg == task_id
+
+    monkeypatch.setattr(server, "terminate_task_process_groups", fake_terminate)
+
+    event = server.get_task_stop_event(task_id)
+
+    class DummyThread:
+        def __init__(self):
+            self.joined = False
+
+        def join(self, timeout=None):
+            self.joined = True
+
+        def is_alive(self):
+            return False
+
+    server.active_threads[task_id] = DummyThread()
+
+    client = server.app.test_client()
+    response = client.delete(f"/api/tasks/{task_id}")
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert terminated["called"] is True
+    assert event.is_set()
+    assert task_id not in server.active_threads
+    assert task_id not in server.task_stop_events
+    assert not os.path.exists(task_path)
 
 
 def test_save_task_state_creates_missing_task_dir(monkeypatch, tmp_path):

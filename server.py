@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from maria.llm import OllamaClient
 from maria.agent import parse_agent_response, MariaAgent
 from maria.security import is_command_critical
-from maria.tools import ToolExecutor
+from maria.tools import ToolExecutor, terminate_task_process_groups
 from maria.memory import (
     load_system_prompt,
     load_lessons,
@@ -34,12 +34,14 @@ app = Flask(
     static_url_path="/static",
 )
 
+
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
     return response
+
 
 @app.before_request
 def handle_options_preflight():
@@ -63,6 +65,8 @@ os.makedirs(MEMORY_DIR, exist_ok=True)
 task_locks = {}
 # Active background task execution threads
 active_threads = {}
+# Stop events for background task execution
+task_stop_events = {}
 
 
 def get_task_lock(task_id):
@@ -91,6 +95,21 @@ def save_task_state(task_id, state):
     with get_task_lock(task_id):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
+
+
+def get_task_stop_event(task_id):
+    if task_id not in task_stop_events:
+        task_stop_events[task_id] = threading.Event()
+    return task_stop_events[task_id]
+
+
+def clear_task_stop_event(task_id):
+    task_stop_events.pop(task_id, None)
+
+
+def stop_task_execution(task_id):
+    event = get_task_stop_event(task_id)
+    event.set()
 
 
 def format_task_prompt(prompt):
@@ -218,7 +237,9 @@ def build_file_tree(dir_path, base_path, current_depth=0, max_depth=5):
                 "type": "directory" if is_dir else "file",
             }
             if is_dir:
-                node["children"] = build_file_tree(full_path, base_path, current_depth + 1, max_depth)
+                node["children"] = build_file_tree(
+                    full_path, base_path, current_depth + 1, max_depth
+                )
             tree.append(node)
     except Exception as e:
         pass
@@ -274,17 +295,19 @@ def run_agent_step_sync(
         save_task_state(task_id, state)
 
     workspace_path = get_task_path(task_id)
-    executor = ToolExecutor(workspace_path)
+    executor = ToolExecutor(workspace_path, task_id=task_id)
     client = OllamaClient(base_url=state.get("ollama_url", OLLAMA_URL))
 
-    agent = MariaAgent(workspace_path, MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL))
+    agent = MariaAgent(
+        workspace_path, MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL)
+    )
 
     # Load memories
     try:
         base_prompt = load_system_prompt(MEMORY_DIR)
     except Exception:
         base_prompt = "You are Maria, an agentic coding assistant. Use TDD."
-        
+
     lessons = load_lessons(MEMORY_DIR)
     lessons_prompt = ""
     if lessons:
@@ -298,35 +321,37 @@ def run_agent_step_sync(
 
     # Handle user intervention injection
     if action == "inject" and user_prompt:
-        state["execution_log"].append({
-            "step": state["step"],
-            "role": "user_intervention",
-            "content": user_prompt
-        })
+        state["execution_log"].append(
+            {"step": state["step"], "role": "user_intervention", "content": user_prompt}
+        )
         state["last_user_intervention"] = user_prompt
         if state["stage"] == "executing_steps" and state.get("messages"):
-            state["messages"].append({
-                "role": "user",
-                "content": f"USER INTERVENTION / INSTRUCTION:\n{user_prompt}"
-            })
+            state["messages"].append(
+                {
+                    "role": "user",
+                    "content": f"USER INTERVENTION / INSTRUCTION:\n{user_prompt}",
+                }
+            )
 
     # State Machine
     if state["stage"] == "improving_prompt":
         try:
             improved = agent.improve_prompt(state["task"], lessons)
             state["improved_prompt"] = improved
-            state["execution_log"].append({
-                "step": state["step"],
-                "role": "system",
-                "content": f"💡 Stage 1 Complete: Improved Prompt:\n{improved}"
-            })
-            
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"💡 Stage 1 Complete: Improved Prompt:\n{improved}",
+                }
+            )
+
             # Transition to generating plan
             state["stage"] = "generating_plan"
             state["proposed_tool"] = {
                 "name": "generate_plan",
                 "args": {},
-                "thought": "Let's generate the complete implementation plan based on the improved prompt."
+                "thought": "Let's generate the complete implementation plan based on the improved prompt.",
             }
             if state["mode"] != "auto":
                 state["status"] = "awaiting_intervention"
@@ -340,16 +365,20 @@ def run_agent_step_sync(
         try:
             plan = agent.generate_plan(state["improved_prompt"])
             state["plan"] = plan
-            state["execution_log"].append({
-                "step": state["step"],
-                "role": "system",
-                "content": f"📋 Stage 2 Complete: Complete Plan:\n{plan}"
-            })
-            
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"📋 Stage 2 Complete: Complete Plan:\n{plan}",
+                }
+            )
+
             # Save plan.md for compatibility
             try:
                 plan_dir, _ = ensure_task_plan_dirs(workspace_path)
-                with open(os.path.join(plan_dir, "plan.md"), "w", encoding="utf-8") as f:
+                with open(
+                    os.path.join(plan_dir, "plan.md"), "w", encoding="utf-8"
+                ) as f:
                     f.write(plan)
             except Exception:
                 pass
@@ -359,7 +388,7 @@ def run_agent_step_sync(
             state["proposed_tool"] = {
                 "name": "create_steps",
                 "args": {},
-                "thought": "Let's break the implementation plan down into sequential steps."
+                "thought": "Let's break the implementation plan down into sequential steps.",
             }
             if state["mode"] != "auto":
                 state["status"] = "awaiting_intervention"
@@ -374,12 +403,14 @@ def run_agent_step_sync(
             steps = agent.create_steps(state["plan"])
             state["steps"] = steps
             steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
-            state["execution_log"].append({
-                "step": state["step"],
-                "role": "system",
-                "content": f"🛠️ Stage 3 Complete: Execution Steps:\n{steps_str}"
-            })
-            
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"🛠️ Stage 3 Complete: Execution Steps:\n{steps_str}",
+                }
+            )
+
             if not steps:
                 raise ValueError("No steps were generated by the LLM.")
 
@@ -387,11 +418,11 @@ def run_agent_step_sync(
             state["stage"] = "executing_steps"
             state["current_step_idx"] = 0
             state["completed_step_summaries"] = []
-            
+
             state["proposed_tool"] = {
                 "name": "execute_step",
                 "args": {"step_num": 1, "description": steps[0]},
-                "thought": f"Let's begin executing step 1 of {len(steps)}: {steps[0]}"
+                "thought": f"Let's begin executing step 1 of {len(steps)}: {steps[0]}",
             }
             if state["mode"] != "auto":
                 state["status"] = "awaiting_intervention"
@@ -407,18 +438,24 @@ def run_agent_step_sync(
         step_num = curr_idx + 1
         total_steps = len(steps)
         last_proposed = state.get("proposed_tool")
-        
+
         # If initializing step
-        if not state.get("messages") or (last_proposed and last_proposed.get("name") == "execute_step" and action == "approve"):
+        if not state.get("messages") or (
+            last_proposed
+            and last_proposed.get("name") == "execute_step"
+            and action == "approve"
+        ):
             completed_context = ""
             if state["completed_step_summaries"]:
                 completed_context = "\nPreviously completed steps:\n"
                 for idx, summary in enumerate(state["completed_step_summaries"], 1):
                     completed_context += f"Step {idx}: {summary}\n"
-            
+
             state["messages"] = [
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": f"""We are executing a multi-stage plan.
+                {
+                    "role": "user",
+                    "content": f"""We are executing a multi-stage plan.
 Complete Plan:
 {state["plan"]}
 {completed_context}
@@ -427,19 +464,22 @@ Step Description: {steps[curr_idx]}
 
 Your objective is to complete ONLY this step using your tools.
 When you believe this step is fully complete, call the 'finish_task' tool with a summary of what you did.
-"""}
+""",
+                },
             ]
-            state["execution_log"].append({
-                "step": state["step"],
-                "role": "system",
-                "content": f"🎬 Starting Step {step_num}/{total_steps}: {steps[curr_idx]}"
-            })
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"🎬 Starting Step {step_num}/{total_steps}: {steps[curr_idx]}",
+                }
+            )
             state["last_tool_result"] = None
             state["last_user_intervention"] = None
 
             # Get first tool proposal
             state = run_llm_for_tool(state, client)
-        
+
         else:
             # Step in progress
             tool_result = None
@@ -462,32 +502,47 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
 
             if tool_result is not None:
                 if tool_result.startswith("Error:"):
-                    state["errors_encountered"].append({
-                        "step": state["step"],
-                        "tool": tool_name,
-                        "args": args,
-                        "error": tool_result
-                    })
+                    state["errors_encountered"].append(
+                        {
+                            "step": state["step"],
+                            "tool": tool_name,
+                            "args": args,
+                            "error": tool_result,
+                        }
+                    )
                 state["last_tool_result"] = tool_result
-                
+
                 try:
                     summary_text = tool_result
                     if len(summary_text) > 1200:
                         summary_text = summary_text[:1200] + "\n\n[truncated]"
-                    save_step_summary(workspace_path, state["step"], f"{applied_action_descr}\n\n{summary_text}")
+                    save_step_summary(
+                        workspace_path,
+                        state["step"],
+                        f"{applied_action_descr}\n\n{summary_text}",
+                    )
                 except Exception:
                     pass
 
                 last_resp = state.get("last_raw_response")
-                if last_resp and (not state["messages"] or state["messages"][-1]["content"] != last_resp):
-                    state["messages"].append({"role": "assistant", "content": last_resp})
-                
-                state["messages"].append({"role": "user", "content": f"TOOL RESULT:\n{tool_result}"})
-                state["execution_log"].append({
-                    "step": state["step"],
-                    "role": "tool_result",
-                    "content": tool_result
-                })
+                if last_resp and (
+                    not state["messages"]
+                    or state["messages"][-1]["content"] != last_resp
+                ):
+                    state["messages"].append(
+                        {"role": "assistant", "content": last_resp}
+                    )
+
+                state["messages"].append(
+                    {"role": "user", "content": f"TOOL RESULT:\n{tool_result}"}
+                )
+                state["execution_log"].append(
+                    {
+                        "step": state["step"],
+                        "role": "tool_result",
+                        "content": tool_result,
+                    }
+                )
 
             # Get next tool proposal
             state = run_llm_for_tool(state, client)
@@ -495,14 +550,20 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
     elif state["stage"] == "verifying":
         try:
             verdict, report = agent.verify_execution(state["plan"], state["steps"])
-            state["execution_log"].append({
-                "step": state["step"],
-                "role": "system",
-                "content": f"🔍 Stage 5 Complete: Final Verification Report:\n{report}\n\nVerdict: {verdict}"
-            })
-            
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"🔍 Stage 5 Complete: Final Verification Report:\n{report}\n\nVerdict: {verdict}",
+                }
+            )
+
             try:
-                with open(os.path.join(workspace_path, "verification_report.md"), "w", encoding="utf-8") as f:
+                with open(
+                    os.path.join(workspace_path, "verification_report.md"),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
                     f.write(f"# Verification Report\n\nVerdict: {verdict}\n\n{report}")
             except Exception:
                 pass
@@ -519,7 +580,9 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 state["status"] = "failed"
                 state["details"] = f"Verification failed. Verdict: {verdict}"
                 try:
-                    add_task_history(MEMORY_DIR, state["task"], "FAILED", f"Verdict: {verdict}")
+                    add_task_history(
+                        MEMORY_DIR, state["task"], "FAILED", f"Verdict: {verdict}"
+                    )
                 except Exception:
                     pass
 
@@ -540,24 +603,26 @@ def run_llm_for_tool(state, client):
     """
     state["step"] += 1
     try:
-        response_text = client.chat(state["messages"], temperature=0.1)
+        response_text = client.chat(state["messages"], temperature=0.1, stream=True)
     except Exception as e:
         err_msg = f"LLM error: {e}"
-        state["errors_encountered"].append({
-            "step": state["step"],
-            "type": "llm_error",
-            "message": err_msg
-        })
+        state["errors_encountered"].append(
+            {"step": state["step"], "type": "llm_error", "message": err_msg}
+        )
         state["status"] = "failed"
         state["details"] = err_msg
         return state
 
     state["last_raw_response"] = response_text
-    state["execution_log"].append({
+    assistant_entry = {
         "step": state["step"],
         "role": "assistant",
-        "content": response_text
-    })
+        "content": response_text,
+    }
+    response_usage = getattr(client, "last_usage", None)
+    if response_usage:
+        assistant_entry["ollama_usage"] = response_usage
+    state["execution_log"].append(assistant_entry)
 
     thought, tool_name, args = parse_agent_response(response_text)
 
@@ -569,18 +634,18 @@ def run_llm_for_tool(state, client):
             return state
 
         err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
-        state["errors_encountered"].append({
-            "step": state["step"],
-            "type": "format_error",
-            "message": err_msg
-        })
+        state["errors_encountered"].append(
+            {"step": state["step"], "type": "format_error", "message": err_msg}
+        )
         state["messages"].append({"role": "assistant", "content": response_text})
         state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
-        state["execution_log"].append({
-            "step": state["step"],
-            "role": "tool_result",
-            "content": f"ERROR: {err_msg}"
-        })
+        state["execution_log"].append(
+            {
+                "step": state["step"],
+                "role": "tool_result",
+                "content": f"ERROR: {err_msg}",
+            }
+        )
         state["status"] = "awaiting_intervention"
         state["proposed_tool"] = None
         return state
@@ -590,19 +655,24 @@ def run_llm_for_tool(state, client):
         curr_idx = state["current_step_idx"]
         step_desc = state["steps"][curr_idx]
         state["completed_step_summaries"].append(f"{step_desc} -> {summary}")
-        state["execution_log"].append({
-            "step": state["step"],
-            "role": "system",
-            "content": f"✅ Step {curr_idx + 1} Complete: {summary}"
-        })
+        state["execution_log"].append(
+            {
+                "step": state["step"],
+                "role": "system",
+                "content": f"✅ Step {curr_idx + 1} Complete: {summary}",
+            }
+        )
 
         next_idx = curr_idx + 1
         if next_idx < len(state["steps"]):
             state["current_step_idx"] = next_idx
             state["proposed_tool"] = {
                 "name": "execute_step",
-                "args": {"step_num": next_idx + 1, "description": state["steps"][next_idx]},
-                "thought": f"Let's begin executing step {next_idx + 1} of {len(state['steps'])}: {state['steps'][next_idx]}"
+                "args": {
+                    "step_num": next_idx + 1,
+                    "description": state["steps"][next_idx],
+                },
+                "thought": f"Let's begin executing step {next_idx + 1} of {len(state['steps'])}: {state['steps'][next_idx]}",
             }
             if state.get("mode") != "auto":
                 state["status"] = "awaiting_intervention"
@@ -613,7 +683,7 @@ def run_llm_for_tool(state, client):
             state["proposed_tool"] = {
                 "name": "verify_execution",
                 "args": {},
-                "thought": "All steps are completed. Let's perform the final audit and verification of all generated files."
+                "thought": "All steps are completed. Let's perform the final audit and verification of all generated files.",
             }
             if state.get("mode") != "auto":
                 state["status"] = "awaiting_intervention"
@@ -665,20 +735,30 @@ def trigger_self_improvement(task_id, state):
 # --- Background Task Thread Loop ---
 
 
-def background_execution_loop(task_id):
+def background_execution_loop(task_id, stop_event):
     """Loop execution steps in background for auto mode"""
     while True:
+        if stop_event.is_set():
+            break
+
         state = load_task_state(task_id)
         if not state or state["status"] != "running":
             break
 
         if not state.get("proposed_tool"):
             state = run_agent_step_sync(task_id, action="inject", user_prompt=None)
-            if not state or state["status"] != "running" or not state.get("proposed_tool"):
+            if (
+                stop_event.is_set()
+                or not state
+                or state["status"] != "running"
+                or not state.get("proposed_tool")
+            ):
                 break
 
         proposed_tool = state.get("proposed_tool")
         if proposed_tool:
+            if stop_event.is_set():
+                break
             if proposed_tool.get("name") == "run_command":
                 command = proposed_tool.get("args", {}).get("command", "")
                 if is_command_critical(command):
@@ -854,13 +934,17 @@ def create_task():
         "ollama_url": OLLAMA_URL,
         "messages": [],
         "execution_log": [
-            {"step": 0, "role": "system", "content": f"Initialized task: {task_prompt}. Stage: Improving user prompt."}
+            {
+                "step": 0,
+                "role": "system",
+                "content": f"Initialized task: {task_prompt}. Stage: Improving user prompt.",
+            }
         ],
         "errors_encountered": [],
         "proposed_tool": {
             "name": "improve_prompt",
             "args": {},
-            "thought": "Let's begin by improving the user prompt using the LLM."
+            "thought": "Let's begin by improving the user prompt using the LLM.",
         },
         "last_raw_response": None,
         "step_summaries": [],
@@ -878,8 +962,11 @@ def create_task():
 
     # 5. Handle initial execution based on mode
     if mode == "auto":
-        # Launch background thread
-        thread = threading.Thread(target=background_execution_loop, args=(task_id,))
+        # Launch background thread with cancellation support
+        stop_event = get_task_stop_event(task_id)
+        thread = threading.Thread(
+            target=background_execution_loop, args=(task_id, stop_event)
+        )
         thread.daemon = True
         thread.start()
         active_threads[task_id] = thread
@@ -920,7 +1007,10 @@ def post_task_action(task_id):
 
         thread = active_threads.get(task_id)
         if not thread or not thread.is_alive():
-            thread = threading.Thread(target=background_execution_loop, args=(task_id,))
+            stop_event = get_task_stop_event(task_id)
+            thread = threading.Thread(
+                target=background_execution_loop, args=(task_id, stop_event)
+            )
             thread.daemon = True
             thread.start()
             active_threads[task_id] = thread
@@ -939,7 +1029,10 @@ def post_task_action(task_id):
     ):
         thread = active_threads.get(task_id)
         if not thread or not thread.is_alive():
-            thread = threading.Thread(target=background_execution_loop, args=(task_id,))
+            stop_event = get_task_stop_event(task_id)
+            thread = threading.Thread(
+                target=background_execution_loop, args=(task_id, stop_event)
+            )
             thread.daemon = True
             thread.start()
             active_threads[task_id] = thread
@@ -967,10 +1060,20 @@ def delete_task(task_id):
         return jsonify({"error": "Task not found"}), 404
 
     try:
+        stop_task_execution(task_id)
+        terminate_task_process_groups(task_id)
+
+        thread = active_threads.get(task_id)
+        if thread:
+            try:
+                thread.join(timeout=2)
+            except Exception:
+                pass
+            active_threads.pop(task_id, None)
+
+        clear_task_stop_event(task_id)
+
         shutil.rmtree(task_path)
-        # Also clean up memory mapping or thread reference if exists
-        if task_id in active_threads:
-            del active_threads[task_id]
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": f"Failed to delete task files: {e}"}), 500
@@ -1082,32 +1185,45 @@ def resume_incomplete_tasks():
         if not os.path.exists(WORKSPACE_DIR):
             return
         for folder in os.listdir(WORKSPACE_DIR):
-            if folder.startswith("task_") and os.path.isdir(os.path.join(WORKSPACE_DIR, folder)):
+            if folder.startswith("task_") and os.path.isdir(
+                os.path.join(WORKSPACE_DIR, folder)
+            ):
                 state = load_task_state(folder)
                 if not state:
                     continue
-                
+
                 status = state.get("status")
                 mode = state.get("mode", "step")
                 task_id = state.get("task_id")
-                
+
                 if status in ("running", "processando"):
-                    print(f"[Startup] Found incomplete task: {task_id} (status: {status}, mode: {mode})", flush=True)
+                    print(
+                        f"[Startup] Found incomplete task: {task_id} (status: {status}, mode: {mode})",
+                        flush=True,
+                    )
                     if mode == "auto":
                         # Put back to running and start background loop
                         state["status"] = "running"
                         save_task_state(task_id, state)
-                        
-                        thread = threading.Thread(target=background_execution_loop, args=(task_id,))
+
+                        thread = threading.Thread(
+                            target=background_execution_loop, args=(task_id,)
+                        )
                         thread.daemon = True
                         thread.start()
                         active_threads[task_id] = thread
-                        print(f"[Startup] Resumed background thread for auto task {task_id}", flush=True)
+                        print(
+                            f"[Startup] Resumed background thread for auto task {task_id}",
+                            flush=True,
+                        )
                     else:
                         # Put back to awaiting_intervention since step was interrupted
                         state["status"] = "awaiting_intervention"
                         save_task_state(task_id, state)
-                        print(f"[Startup] Reset task {task_id} status to awaiting_intervention", flush=True)
+                        print(
+                            f"[Startup] Reset task {task_id} status to awaiting_intervention",
+                            flush=True,
+                        )
     except Exception as e:
         print(f"[Startup] Error resuming incomplete tasks: {e}", flush=True)
 
@@ -1118,10 +1234,8 @@ if __name__ == "__main__":
     # when the agent writes workspace or memory files.
     flask_env = os.environ.get("FLASK_ENV", "development")
     debug_mode = flask_env == "development" and os.environ.get("DEBUG", "1") == "1"
-    
+
     # Resume any tasks that were left incomplete before starting Flask
     resume_incomplete_tasks()
-    
+
     app.run(host="0.0.0.0", port=5002, debug=debug_mode, use_reloader=False)
-
-

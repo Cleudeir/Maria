@@ -1,10 +1,10 @@
 # Task Plan
 
-Created: 2026-05-19 16:16:54
+Created: 2026-05-19 17:05:38
 
 ## Task
 
-create game snake
+create snake game
 
 ## Notes
 
