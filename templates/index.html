@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maria - Agent Control Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- External stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <!-- Sidebar Task Manager -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="brand">
+                <div class="brand-logo"><i class="fa-solid fa-brain-circuit"></i> MARIA</div>
+                <div class="brand-badge">slm</div>
+            </div>
+        </div>
+        
+        <button class="btn-new-task" onclick="openNewTaskModal()">
+            <i class="fa-solid fa-plus"></i> New Agent Task
+        </button>
+        
+        <div class="tasks-list-container">
+            <div class="tasks-list-title">Active / Past Tasks</div>
+            <div id="tasks-list">
+                <!-- Loaded dynamically -->
+            </div>
+        </div>
+        
+        <div class="sidebar-footer">
+            <button class="btn-footer" onclick="openPromptModal()">
+                <i class="fa-solid fa-sliders"></i> Prompt
+            </button>
+            <button class="btn-footer" onclick="openLessonsModal()">
+                <i class="fa-solid fa-graduation-cap"></i> Lessons
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Workspace Area -->
+    <div class="main-workspace">
+        
+        <!-- Welcome / Dashboard View -->
+        <div class="welcome-view" id="welcome-view">
+            <div class="welcome-logo">🤖</div>
+            <div class="welcome-title">Maria Console</div>
+            <div class="welcome-subtitle">Welcome to the self-improving coding assistant dashboard. Run, monitor, and interact with agent tasks.</div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">Total Tasks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-rate">0%</div>
+                    <div class="stat-label">Success Rate</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-running">0</div>
+                    <div class="stat-label">Running</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-lessons">0</div>
+                    <div class="stat-label">Lessons Stored</div>
+                </div>
+            </div>
+            
+            <button class="btn-action" onclick="openNewTaskModal()">
+                <i class="fa-solid fa-bolt"></i> Launch First Task
+            </button>
+        </div>
+
+        <!-- Task Execution View -->
+        <div class="task-view" id="task-view" style="display: none;">
+            <div class="task-header">
+                <div class="task-header-left">
+                    <div class="task-header-title" id="active-task-desc">Task description goes here...</div>
+                    <div class="task-header-meta">
+                        <span class="task-header-badge" id="active-task-status">Awaiting Intervention</span>
+                        <span class="task-header-step" id="active-task-step">Step: 4/20</span>
+                    </div>
+                </div>
+                
+                <div class="task-header-actions">
+                    <button class="btn-action danger" onclick="deleteActiveTask()">
+                        <i class="fa-solid fa-trash-can"></i> Delete
+                    </button>
+                </div>
+            </div>
+            
+            <div class="workspace-split">
+                
+                <!-- Left panel: logs and step cards -->
+                <div style="flex: 1; display: flex; flex-direction: column; overflow-y: auto;">
+                    <div class="execution-panel" id="execution-log">
+                        <!-- Step log cards loaded dynamically -->
+                    </div>
+                    
+                    <!-- Intervention Console -->
+                    <div class="intervention-console" id="intervention-console" style="display: none;">
+                        <div class="intervention-header">
+                            <div class="intervention-title">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Action Required: Intervene in Execution
+                            </div>
+                        </div>
+                        
+                        <div id="intervention-thought-container" style="display: none;">
+                            <div class="form-label">Agent Thought:</div>
+                            <div class="intervention-thought" id="intervention-thought"></div>
+                        </div>
+                        
+                        <!-- Proposed Tool Edit Box -->
+                        <div class="proposed-tool-box" id="proposed-tool-container" style="display: none;">
+                            <div class="proposed-tool-header">Proposed Tool: <span id="proposed-tool-name">write_file</span></div>
+                            <div class="form-label">Arguments JSON:</div>
+                            <textarea class="tool-args-edit" id="proposed-tool-args"></textarea>
+                        </div>
+                        
+                        <!-- Free-form user text to override / prompt next turn -->
+                        <div>
+                            <div class="form-label">Send New Instruction / Prompt to Same Task:</div>
+                            <textarea class="intervention-prompt-input" id="intervention-prompt" placeholder="Tell the agent what to do, correct its strategy, or give a new task guideline..."></textarea>
+                        </div>
+                        
+                        <div class="intervention-actions">
+                            <button class="btn-intervention btn-approve" id="btn-approve-tool" onclick="submitIntervention('approve')">
+                                <i class="fa-solid fa-check"></i> Approve & Step
+                            </button>
+                            <button class="btn-intervention btn-modify" id="btn-modify-tool" onclick="submitIntervention('modify')">
+                                <i class="fa-solid fa-pen-to-square"></i> Modify & Run Tool
+                            </button>
+                            <button class="btn-intervention btn-send-prompt" onclick="submitIntervention('inject')">
+                                <i class="fa-solid fa-paper-plane"></i> Send Prompt
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right panel: file manager / tree / file editor -->
+                <div class="workspace-panel">
+                    <div class="workspace-header">
+                        <span>Workspace Files</span>
+                        <i class="fa-solid fa-folder-open" style="color: var(--text-muted);"></i>
+                    </div>
+                    
+                    <div class="file-tree-container" id="file-tree">
+                        <!-- Loaded dynamically -->
+                    </div>
+                    
+                    <!-- File editor view -->
+                    <div class="editor-container" id="editor-pane" style="display: none;">
+                        <div class="editor-header">
+                            <span class="editor-filename" id="editor-filename">untitled.py</span>
+                            <div class="editor-actions">
+                                <button class="btn-editor" onclick="closeEditor()">Cancel</button>
+                                <button class="btn-editor btn-editor-save" onclick="saveEditorContent()">Save</button>
+                            </div>
+                        </div>
+                        <textarea class="editor-textarea" id="editor-textarea" spellcheck="false"></textarea>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modal: New Task Creation -->
+    <div class="modal-overlay" id="modal-new-task">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title">Create New Agent Task</div>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeModals()"></i>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">What should Maria do?</label>
+                <textarea class="form-textarea" id="new-task-prompt" placeholder="e.g. Write a Python function to compute the N-th prime number, write a unit test with TDD and ensure they all pass..."></textarea>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Max Allowed Steps</label>
+                    <input type="number" class="form-input" id="new-task-steps" value="20" min="1" max="100">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Initial Execution Mode</label>
+                    <select class="form-select" id="new-task-mode">
+                        <option value="auto">Auto-run, approve only sensitive commands</option>
+                        <option value="step">Step-by-Step (User Approvals)</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-modal" onclick="closeModals()">Cancel</button>
+                <button class="btn-modal btn-modal-submit" onclick="submitNewTask()">Launch Task</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: System Prompt Editor -->
+    <div class="modal-overlay" id="modal-system-prompt">
+        <div class="modal-box" style="width: 700px;">
+            <div class="modal-header">
+                <div class="modal-title">Edit System Prompt Memory</div>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeModals()"></i>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Current Guidelines Prompt</label>
+                <textarea class="form-textarea" id="system-prompt-text" style="height: 350px; font-family: var(--font-code); font-size: 12px;"></textarea>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-modal" onclick="closeModals()">Cancel</button>
+                <button class="btn-modal btn-modal-submit" onclick="saveSystemPrompt()">Save Prompts</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Lessons Learned list -->
+    <div class="modal-overlay" id="modal-lessons">
+        <div class="modal-box" style="width: 700px;">
+            <div class="modal-header">
+                <div class="modal-title">Lessons Learned Memory</div>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeModals()"></i>
+            </div>
+            
+            <div class="form-group" style="max-height: 400px; overflow-y: auto;" id="lessons-list-container">
+                <!-- Lessons items loaded dynamically -->
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-modal" onclick="closeModals()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- External script -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,590 @@
+let currentTaskId = null;
+let activePollingInterval = null;
+let editingFilePath = null;
+
+// On Load
+document.addEventListener("DOMContentLoaded", () => {
+  refreshDashboard();
+  loadTasksList();
+
+  // Periodically refresh list & active task log
+  setInterval(() => {
+    loadTasksList();
+    if (currentTaskId) {
+      pollActiveTaskState();
+    } else {
+      refreshDashboard();
+    }
+  }, 3000);
+});
+
+// Load Task List Sidebar
+async function loadTasksList() {
+  try {
+    const res = await fetch("/api/tasks");
+    const tasks = await res.json();
+
+    const listEl = document.getElementById("tasks-list");
+    listEl.innerHTML = "";
+
+    if (tasks.length === 0) {
+      listEl.innerHTML =
+        '<div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px;">No tasks found</div>';
+      return;
+    }
+
+    tasks.forEach((task) => {
+      const isActive = task.task_id === currentTaskId;
+      const item = document.createElement("div");
+      item.className = `task-item ${isActive ? "active" : ""}`;
+      item.onclick = () => selectTask(task.task_id);
+
+      const statusClass = `status-${task.status}`;
+      const statusLabel = task.status.replace(/_/g, " ");
+
+      item.innerHTML = `
+                <div class="task-item-header">
+                    <span class="task-item-id">${task.task_id}</span>
+                    <span class="task-item-status ${statusClass}">${statusLabel}</span>
+                </div>
+                <div class="task-item-desc" title="${task.task}">${task.task}</div>
+                <div class="task-item-date">
+                    <span>Step: ${task.step}/${task.max_steps}</span>
+                    <span>${task.created_at || ""}</span>
+                </div>
+            `;
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    console.error("Error loading tasks", err);
+  }
+}
+
+// Refresh Stats Dashboard
+async function refreshDashboard() {
+  try {
+    const res = await fetch("/api/dashboard");
+    const data = await res.json();
+
+    document.getElementById("stat-total").innerText = data.stats.total_tasks;
+    document.getElementById("stat-rate").innerText =
+      data.stats.success_rate + "%";
+    document.getElementById("stat-running").innerText = data.stats.running;
+    document.getElementById("stat-lessons").innerText =
+      data.stats.lessons_count;
+  } catch (err) {
+    console.error("Error refreshing dashboard", err);
+  }
+}
+
+// Select task from sidebar
+async function selectTask(taskId) {
+  currentTaskId = taskId;
+  closeEditor();
+
+  document.getElementById("welcome-view").style.display = "none";
+  document.getElementById("task-view").style.display = "flex";
+
+  // Highlight list item
+  const items = document.querySelectorAll(".task-item");
+  items.forEach((it) => it.classList.remove("active"));
+
+  // Force fetch details immediately
+  await getTaskDetails(taskId);
+  loadTasksList();
+}
+
+// Fetch task details from API
+async function getTaskDetails(taskId) {
+  try {
+    const res = await fetch(`/api/tasks/${taskId}`);
+    if (!res.ok) throw new Error();
+    const task = await res.json();
+
+    // Update header info
+    document.getElementById("active-task-desc").innerText = task.task;
+    document.getElementById("active-task-desc").title = task.task;
+
+    const statusEl = document.getElementById("active-task-status");
+    statusEl.innerText = task.status.replace(/_/g, " ");
+    statusEl.className = `task-header-badge status-${task.status}`;
+
+    document.getElementById("active-task-step").innerText =
+      `Step: ${task.step}/${task.max_steps}`;
+
+    // Render Execution logs
+    renderExecutionLogs(task.execution_log);
+
+    // Render Workspace Files
+    renderFileTree(task.file_tree);
+
+    // Handle Intervention Console
+    const consoleEl = document.getElementById("intervention-console");
+    if (
+      task.status === "awaiting_intervention" ||
+      task.status === "completed" ||
+      task.status === "failed"
+    ) {
+      consoleEl.style.display = "flex";
+
+      const proposed = task.proposed_tool;
+      const thoughtEl = document.getElementById(
+        "intervention-thought-container",
+      );
+      const proposedEl = document.getElementById("proposed-tool-container");
+
+      if (proposed) {
+        if (proposed.thought) {
+          thoughtEl.style.display = "block";
+          document.getElementById("intervention-thought").innerText =
+            proposed.thought;
+        } else {
+          thoughtEl.style.display = "none";
+        }
+
+        if (proposed.name) {
+          proposedEl.style.display = "block";
+          document.getElementById("proposed-tool-name").innerText =
+            proposed.name;
+          document.getElementById("proposed-tool-args").value = JSON.stringify(
+            proposed.args,
+            null,
+            2,
+          );
+
+          document.getElementById("btn-approve-tool").style.display = "flex";
+          document.getElementById("btn-modify-tool").style.display = "flex";
+        } else {
+          // Formatting error or system prompt turn
+          proposedEl.style.display = "none";
+          document.getElementById("btn-approve-tool").style.display = "none";
+          document.getElementById("btn-modify-tool").style.display = "none";
+        }
+      } else {
+        thoughtEl.style.display = "none";
+        proposedEl.style.display = "none";
+        document.getElementById("btn-approve-tool").style.display = "none";
+        document.getElementById("btn-modify-tool").style.display = "none";
+      }
+    } else {
+      consoleEl.style.display = "none";
+    }
+  } catch (err) {
+    console.error("Error loading task details", err);
+    currentTaskId = null;
+    document.getElementById("welcome-view").style.display = "flex";
+    document.getElementById("task-view").style.display = "none";
+  }
+}
+
+// Active task polling during execution
+async function pollActiveTaskState() {
+  if (!currentTaskId) return;
+  getTaskDetails(currentTaskId);
+}
+
+// Render logs
+function escapeHtml(text) {
+  if (text === null || text === undefined) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderExecutionLogs(log) {
+  const container = document.getElementById("execution-log");
+  if (!Array.isArray(log)) log = [];
+
+  container.innerHTML = "";
+
+  log.forEach((entry) => {
+    const card = document.createElement("div");
+    card.className = `log-card log-role-${entry.role}`;
+
+    const titleRole = entry.role.replace(/_/g, " ").toUpperCase();
+    let icon = '<i class="fa-solid fa-server"></i>';
+    if (entry.role === "assistant") icon = '<i class="fa-solid fa-robot"></i>';
+    if (entry.role === "tool_result")
+      icon = '<i class="fa-solid fa-terminal"></i>';
+    if (entry.role === "user_intervention")
+      icon = '<i class="fa-solid fa-user-pen"></i>';
+
+    card.innerHTML = `
+            <div class="log-card-header">
+                <span>${icon} ${titleRole} (Step ${entry.step || "-"})</span>
+            </div>
+            <div class="log-card-body">
+                ${renderLogContent(entry)}
+            </div>
+        `;
+    container.appendChild(card);
+  });
+
+  container.scrollTop = container.scrollHeight;
+}
+
+function renderLogContent(entry) {
+  const rawContent = entry.content || "";
+  const content = escapeHtml(rawContent);
+
+  if (entry.role === "assistant") {
+    let thoughtHtml = "";
+    let toolHtml = "";
+
+    const thoughtMatch =
+      rawContent.match(/<thought>([\s\S]*?)<\/thought>/i) ||
+      rawContent.match(/<thought>([\s\S]*?)(?:<tool|\Z)/i);
+    if (thoughtMatch) {
+      thoughtHtml = `<div class="log-thought">${escapeHtml(thoughtMatch[1].trim())}</div>`;
+    }
+
+    const toolMatch = rawContent.match(
+      /<tool\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/tool>/i,
+    );
+    if (toolMatch) {
+      const toolName = toolMatch[1].trim();
+      const argsBlock = escapeHtml(toolMatch[2].trim());
+
+      toolHtml = `
+                <div class="log-tool-call">
+                    <div class="log-tool-title"><i class="fa-solid fa-wrench"></i> Tool Action: ${escapeHtml(toolName)}</div>
+                    <div class="log-tool-args">${argsBlock}</div>
+                </div>
+            `;
+    }
+
+    if (!thoughtHtml && !toolHtml) {
+      return `<div class="log-thought">${content}</div>`;
+    }
+
+    return thoughtHtml + toolHtml;
+  }
+
+  if (entry.role === "tool_result") {
+    return `<pre class="log-pre">${content}</pre>`;
+  }
+
+  return `<div style="font-size: 14px; line-height: 1.5;">${content}</div>`;
+}
+
+// Render Workspace File Tree
+function renderFileTree(nodes) {
+  const container = document.getElementById("file-tree");
+  container.innerHTML = "";
+
+  if (!nodes || nodes.length === 0) {
+    container.innerHTML =
+      '<div style="color: var(--text-muted); font-size: 12px; padding: 10px;">(Empty Workspace)</div>';
+    return;
+  }
+
+  container.appendChild(buildTreeNodeList(nodes));
+}
+
+function buildTreeNodeList(nodes) {
+  const ul = document.createElement("div");
+  ul.className = "tree-children";
+
+  nodes.forEach((node) => {
+    const li = document.createElement("div");
+    li.className = "tree-node";
+
+    const isDir = node.type === "directory";
+    const icon = isDir
+      ? '<i class="fa-solid fa-folder tree-icon-folder"></i>'
+      : '<i class="fa-solid fa-file-code tree-icon-file"></i>';
+
+    const item = document.createElement("div");
+    item.className = `tree-item ${editingFilePath === node.path ? "active" : ""}`;
+    item.innerHTML = `${icon} <span>${node.name}</span>`;
+
+    if (isDir) {
+      item.onclick = (e) => {
+        e.stopPropagation();
+        const childContainer = li.querySelector(".tree-children");
+        if (childContainer.style.display === "none") {
+          childContainer.style.display = "block";
+          item.querySelector(".tree-icon-folder").className =
+            "fa-solid fa-folder-open tree-icon-folder";
+        } else {
+          childContainer.style.display = "none";
+          item.querySelector(".tree-icon-folder").className =
+            "fa-solid fa-folder tree-icon-folder";
+        }
+      };
+      li.appendChild(item);
+
+      const subUl = buildTreeNodeList(node.children);
+      li.appendChild(subUl);
+    } else {
+      item.onclick = (e) => {
+        e.stopPropagation();
+        openFileEditor(node.path);
+      };
+      li.appendChild(item);
+    }
+
+    ul.appendChild(li);
+  });
+
+  return ul;
+}
+
+// Open file in Editor panel
+async function openFileEditor(filePath) {
+  editingFilePath = filePath;
+  document.getElementById("editor-pane").style.display = "flex";
+  document.getElementById("editor-filename").innerText = filePath
+    .split("/")
+    .pop();
+
+  // Update active styling in file tree
+  const treeItems = document.querySelectorAll(".tree-item");
+  treeItems.forEach((el) => {
+    if (el.textContent.trim() === filePath.split("/").pop()) {
+      el.classList.add("active");
+    } else {
+      el.classList.remove("active");
+    }
+  });
+
+  try {
+    const res = await fetch(
+      `/api/tasks/${currentTaskId}/files/view?path=${encodeURIComponent(filePath)}`,
+    );
+    const data = await res.json();
+    document.getElementById("editor-textarea").value = data.content || "";
+  } catch (err) {
+    console.error("Error viewing file", err);
+  }
+}
+
+// Close File Editor panel
+function closeEditor() {
+  editingFilePath = null;
+  document.getElementById("editor-pane").style.display = "none";
+  document.getElementById("editor-textarea").value = "";
+
+  const treeItems = document.querySelectorAll(".tree-item");
+  treeItems.forEach((el) => el.classList.remove("active"));
+}
+
+// Save file edit content
+async function saveEditorContent() {
+  if (!currentTaskId || !editingFilePath) return;
+  const content = document.getElementById("editor-textarea").value;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/files/edit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: editingFilePath, content: content }),
+    });
+
+    if (res.ok) {
+      alert("File saved successfully!");
+      // Refresh details to update file tree (if structure changed)
+      getTaskDetails(currentTaskId);
+    } else {
+      alert("Failed to save file.");
+    }
+  } catch (err) {
+    console.error("Error saving file", err);
+  }
+}
+
+// Delete active task
+async function deleteActiveTask() {
+  if (!currentTaskId) return;
+  if (
+    !confirm(
+      "Are you sure you want to delete this task? All workspace files and logs will be permanently removed.",
+    )
+  )
+    return;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      currentTaskId = null;
+      document.getElementById("welcome-view").style.display = "flex";
+      document.getElementById("task-view").style.display = "none";
+      loadTasksList();
+      refreshDashboard();
+    } else {
+      alert("Failed to delete task.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// Submit Intervention
+async function submitIntervention(action) {
+  if (!currentTaskId) return;
+
+  const payload = { action: action };
+
+  if (action === "modify") {
+    const toolName = document.getElementById("proposed-tool-name").innerText;
+    let toolArgs = {};
+    try {
+      toolArgs = JSON.parse(
+        document.getElementById("proposed-tool-args").value,
+      );
+    } catch (e) {
+      alert("Invalid JSON format in arguments.");
+      return;
+    }
+    payload.modified_tool = { name: toolName, args: toolArgs };
+  }
+
+  if (action === "inject") {
+    const userPrompt = document
+      .getElementById("intervention-prompt")
+      .value.trim();
+    if (!userPrompt) {
+      alert("Please write a instruction prompt first.");
+      return;
+    }
+    payload.user_prompt = userPrompt;
+  }
+
+  // Clear input fields
+  document.getElementById("intervention-prompt").value = "";
+
+  try {
+    // Show loading indicator
+    const consoleEl = document.getElementById("intervention-console");
+    consoleEl.style.opacity = "0.5";
+    consoleEl.style.pointerEvents = "none";
+
+    const res = await fetch(`/api/tasks/${currentTaskId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const task = await res.json();
+
+    consoleEl.style.opacity = "1";
+    consoleEl.style.pointerEvents = "all";
+
+    getTaskDetails(currentTaskId);
+    loadTasksList();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- Modals Handlers ---
+
+function openNewTaskModal() {
+  document.getElementById("modal-new-task").classList.add("active");
+  document.getElementById("new-task-prompt").focus();
+}
+
+async function submitNewTask() {
+  const taskText = document.getElementById("new-task-prompt").value.trim();
+  if (!taskText) {
+    alert("Please write a task description.");
+    return;
+  }
+  const steps = parseInt(document.getElementById("new-task-steps").value) || 20;
+  const mode = document.getElementById("new-task-mode").value;
+
+  closeModals();
+
+  try {
+    const res = await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: taskText, max_steps: steps, mode: mode }),
+    });
+    const task = await res.json();
+
+    // Clear fields
+    document.getElementById("new-task-prompt").value = "";
+
+    // Select and load the new task
+    selectTask(task.task_id);
+  } catch (err) {
+    console.error("Error creating task", err);
+  }
+}
+
+// System Prompt Modal
+async function openPromptModal() {
+  try {
+    const res = await fetch("/api/memory/prompt");
+    const data = await res.json();
+    document.getElementById("system-prompt-text").value = data.prompt || "";
+    document.getElementById("modal-system-prompt").classList.add("active");
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function saveSystemPrompt() {
+  const text = document.getElementById("system-prompt-text").value;
+  try {
+    const res = await fetch("/api/memory/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text }),
+    });
+    if (res.ok) {
+      alert("System prompt updated!");
+      closeModals();
+    } else {
+      alert("Failed to update system prompt.");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// Lessons learned Modal
+async function openLessonsModal() {
+  try {
+    const res = await fetch("/api/memory/lessons");
+    const data = await res.json();
+
+    const container = document.getElementById("lessons-list-container");
+    container.innerHTML = "";
+
+    const lessons = data.lessons || [];
+    if (lessons.length === 0) {
+      container.innerHTML =
+        '<div style="color: var(--text-muted); font-size: 13px; text-align: center;">No lessons learned yet. Complete tasks to gather learnings.</div>';
+    } else {
+      lessons.forEach((l, i) => {
+        const item = document.createElement("div");
+        item.style.background = "rgba(0,0,0,0.2)";
+        item.style.padding = "16px";
+        item.style.borderRadius = "8px";
+        item.style.border = "1px solid var(--border-color)";
+        item.style.marginBottom = "10px";
+
+        item.innerHTML = `
+                            <div style="font-weight: 700; color: #818cf8; margin-bottom: 6px;">Lesson ${i + 1}: ${l.title}</div>
+                            ${l.error ? `<div style="font-family: var(--font-code); font-size: 12px; color: var(--color-danger); background: rgba(239, 68, 68, 0.05); padding: 8px; border-radius: 4px; margin-bottom: 6px;">Error: ${l.error}</div>` : ""}
+                            <div style="font-size: 13px; color: var(--text-primary); line-height: 1.4;"><strong style="color: var(--color-success)">Fix:</strong> ${l.resolution}</div>
+                        `;
+        container.appendChild(item);
+      });
+    }
+
+    document.getElementById("modal-lessons").classList.add("active");
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function closeModals() {
+  document
+    .querySelectorAll(".modal-overlay")
+    .forEach((el) => el.classList.remove("active"));
+}
