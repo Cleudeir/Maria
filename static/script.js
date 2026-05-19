@@ -118,13 +118,25 @@ async function refreshDashboard() {
 
 // Select task from sidebar
 async function selectTask(taskId) {
+  if (currentTaskId === taskId) {
+    return; // Avoid reloading active task and duplicating logs
+  }
   currentTaskId = taskId;
   renderedLogEntries = {};
+
+  // Clear execution log container to prevent any UI mismatch
+  const container = document.getElementById("execution-log");
+  if (container) {
+    container.innerHTML = "";
+    container.dataset.taskId = "";
+  }
+
   executionLogAutoScroll = true;
   lastTaskDetailsJson = null;
   lastFileTreeJson = null;
   expandedFolders = {}; // clear folders state when switching tasks
   closeEditor();
+  toggleSidebar(false);
 
   document.getElementById("welcome-view").style.display = "none";
   document.getElementById("task-view").style.display = "flex";
@@ -748,4 +760,18 @@ function closeModals() {
   document
     .querySelectorAll(".modal-overlay")
     .forEach((el) => el.classList.remove("active"));
+}
+
+function toggleSidebar(open) {
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("sidebar-overlay");
+  if (!sidebar || !overlay) return;
+
+  if (open) {
+    sidebar.classList.add("open");
+    overlay.classList.add("active");
+  } else {
+    sidebar.classList.remove("open");
+    overlay.classList.remove("active");
+  }
 }

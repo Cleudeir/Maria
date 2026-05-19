@@ -56,15 +56,6 @@ class MariaAgent:
         self.errors_encountered = []
 
     def improve_prompt(self, task: str, lessons: List[Dict[str, str]]) -> str:
-        lessons_str = ""
-        if lessons:
-            lessons_str = "\nLessons learned from previous runs to prevent repeating mistakes:\n"
-            for i, l in enumerate(lessons, 1):
-                lessons_str += f"Lesson {i}: {l['title']}\n"
-                if l.get("error"):
-                    lessons_str += f"  Previous Error: {l['error']}\n"
-                lessons_str += f"  Correction/Resolution: {l['resolution']}\n"
-
         prompt = f"""You are an expert prompt engineer. Your job is to improve the user's prompt to be extremely clear, detailed, precise, and structured. 
 Ensure all requirements, edge cases, and testing strategies are explicit. Keep the original intent intact.
 
@@ -72,7 +63,7 @@ Original User Task:
 ---
 {task}
 ---
-{lessons_str}
+
 Response Format:
 Provide only the improved task prompt. Do not add any preamble (like "Here is the improved prompt:") or XML tags. Just the refined, detailed prompt.
 """

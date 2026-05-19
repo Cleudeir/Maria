@@ -25,6 +25,9 @@ class ToolExecutor:
             items = os.listdir(target_dir)
             result = []
             for item in sorted(items):
+                # Hide internal task metadata files
+                if item in ("task_state.json", "task_info.html"):
+                    continue
                 item_path = os.path.join(target_dir, item)
                 is_dir = os.path.isdir(item_path)
                 result.append(f"{'[DIR]' if is_dir else '[FILE]'} {item}")
@@ -45,6 +48,10 @@ class ToolExecutor:
         if os.path.isdir(target_file):
             return f"Error: Path '{path}' is a directory, not a file."
             
+        filename = os.path.basename(target_file)
+        if filename in ("task_state.json", "task_info.html"):
+            return "Error: Access Denied. Internal system file."
+
         try:
             with open(target_file, "r", encoding="utf-8") as f:
                 return f.read()
@@ -60,6 +67,10 @@ class ToolExecutor:
             
         target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
         
+        filename = os.path.basename(target_file)
+        if filename in ("task_state.json", "task_info.html"):
+            return "Error: Access Denied. Internal system file."
+
         try:
             # Create parent directories if needed
             os.makedirs(os.path.dirname(target_file), exist_ok=True)
@@ -90,7 +101,7 @@ class ToolExecutor:
                 cwd=self.workspace_dir,
                 text=True,
                 capture_output=True,
-                timeout=60
+                timeout=300
             )
             
             output = ""
@@ -105,6 +116,6 @@ class ToolExecutor:
             return f"Success: Command executed successfully.\nOutput:\n{output.strip()}"
             
         except subprocess.TimeoutExpired:
-            return "Error: Command timed out after 60 seconds."
+            return "Error: Command timed out after 300 seconds."
         except Exception as e:
             return f"Error: Failed to run command: {e}"

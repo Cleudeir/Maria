@@ -16,12 +16,15 @@
 <body>
 
     <!-- Sidebar Task Manager -->
-    <div class="sidebar">
+    <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="brand">
                 <div class="brand-logo"><i class="fa-solid fa-brain-circuit"></i> MARIA</div>
                 <div class="brand-badge">slm</div>
             </div>
+            <button class="btn-sidebar-close" onclick="toggleSidebar(false)" aria-label="Close sidebar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
         
         <button class="btn-new-task" onclick="openNewTaskModal()">
@@ -45,9 +48,23 @@
         </div>
     </div>
 
+    <!-- Sidebar Overlay for Mobile -->
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar(false)"></div>
+
     <!-- Main Workspace Area -->
     <div class="main-workspace">
         
+        <!-- Mobile Top Bar -->
+        <div class="mobile-topbar">
+            <button class="btn-hamburger" onclick="toggleSidebar(true)" aria-label="Open sidebar">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            <div class="brand">
+                <div class="brand-logo"><i class="fa-solid fa-brain-circuit"></i> MARIA</div>
+                <div class="brand-badge">slm</div>
+            </div>
+        </div>
+
         <!-- Welcome / Dashboard View -->
         <div class="welcome-view" id="welcome-view">
             <div class="welcome-logo">🤖</div>

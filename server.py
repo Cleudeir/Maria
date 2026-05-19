@@ -1051,11 +1051,57 @@ def manage_lessons():
             return jsonify({"error": str(e)}), 500
 
 
+def resume_incomplete_tasks():
+    """
+    Scans workspace for incomplete tasks and resumes them.
+    If task mode is auto, restarts the background execution loop.
+    If task mode is step, resets state from processando to awaiting_intervention.
+    """
+    print("[Startup] Scanning for incomplete tasks to resume...", flush=True)
+    try:
+        if not os.path.exists(WORKSPACE_DIR):
+            return
+        for folder in os.listdir(WORKSPACE_DIR):
+            if folder.startswith("task_") and os.path.isdir(os.path.join(WORKSPACE_DIR, folder)):
+                state = load_task_state(folder)
+                if not state:
+                    continue
+                
+                status = state.get("status")
+                mode = state.get("mode", "step")
+                task_id = state.get("task_id")
+                
+                if status in ("running", "processando"):
+                    print(f"[Startup] Found incomplete task: {task_id} (status: {status}, mode: {mode})", flush=True)
+                    if mode == "auto":
+                        # Put back to running and start background loop
+                        state["status"] = "running"
+                        save_task_state(task_id, state)
+                        
+                        thread = threading.Thread(target=background_execution_loop, args=(task_id,))
+                        thread.daemon = True
+                        thread.start()
+                        active_threads[task_id] = thread
+                        print(f"[Startup] Resumed background thread for auto task {task_id}", flush=True)
+                    else:
+                        # Put back to awaiting_intervention since step was interrupted
+                        state["status"] = "awaiting_intervention"
+                        save_task_state(task_id, state)
+                        print(f"[Startup] Reset task {task_id} status to awaiting_intervention", flush=True)
+    except Exception as e:
+        print(f"[Startup] Error resuming incomplete tasks: {e}", flush=True)
+
+
 if __name__ == "__main__":
     # Disable debug/reloader when running in production or under PM2.
     # We also disable the auto-reloader (use_reloader=False) to prevent loop restarts
     # when the agent writes workspace or memory files.
     flask_env = os.environ.get("FLASK_ENV", "development")
     debug_mode = flask_env == "development" and os.environ.get("DEBUG", "1") == "1"
+    
+    # Resume any tasks that were left incomplete before starting Flask
+    resume_incomplete_tasks()
+    
     app.run(host="0.0.0.0", port=5002, debug=debug_mode, use_reloader=False)
+
 
