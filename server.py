@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from maria.llm import OllamaClient
-from maria.agent import parse_agent_response
+from maria.agent import parse_agent_response, MariaAgent
 from maria.security import is_command_critical
 from maria.tools import ToolExecutor
 from maria.memory import (
@@ -33,6 +33,23 @@ app = Flask(
     static_folder="static",
     static_url_path="/static",
 )
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+    return response
+
+@app.before_request
+def handle_options_preflight():
+    if request.method == "OPTIONS":
+        response = app.make_response("")
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+        return response
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR = os.path.join(BASE_DIR, "workspace")
@@ -83,7 +100,91 @@ def format_task_prompt(prompt):
     )
 
 
-def build_file_tree(dir_path, base_path):
+def get_plan_dir(task_path):
+    return os.path.join(task_path, "plan")
+
+
+def get_plan_steps_dir(task_path):
+    return os.path.join(get_plan_dir(task_path), "steps")
+
+
+def ensure_task_plan_dirs(task_path):
+    plan_dir = get_plan_dir(task_path)
+    steps_dir = get_plan_steps_dir(task_path)
+    os.makedirs(steps_dir, exist_ok=True)
+    return plan_dir, steps_dir
+
+
+def save_plan_overview(task_path, task_prompt, created_time_str):
+    plan_dir, _ = ensure_task_plan_dirs(task_path)
+    plan_md_path = os.path.join(plan_dir, "plan.md")
+    with open(plan_md_path, "w", encoding="utf-8") as f:
+        f.write("# Task Plan\n\n")
+        f.write(f"Created: {created_time_str}\n\n")
+        f.write("## Task\n\n")
+        f.write(f"{task_prompt}\n\n")
+        f.write("## Notes\n\n")
+        f.write(
+            "- Initial task created. The agent should create a step-by-step plan and implement it incrementally while minimizing context sent to the LLM.\n"
+        )
+    return plan_md_path
+
+
+def save_step_summary(task_path, step, summary):
+    _, steps_dir = ensure_task_plan_dirs(task_path)
+    step_path = os.path.join(steps_dir, f"step_{step:03d}.md")
+    with open(step_path, "w", encoding="utf-8") as f:
+        f.write(f"# Step {step}\n\n")
+        f.write(summary)
+        if not summary.endswith("\n"):
+            f.write("\n")
+    return step_path
+
+
+def build_step_prompt(state):
+    task_prompt = state.get("task", "")
+    prompt_lines = [
+        "Use only the minimum context required for this step. Do not resend the entire conversation history.",
+        "You are an agentic assistant executing a single step at a time.",
+        "You should output your reasoning and the next tool action in XML-like format.",
+        "\n",
+        "Task:\n" + task_prompt,
+        f"\nCurrent step: {state.get('step', 0) + 1} of {state.get('max_steps', 0)}.\n",
+    ]
+
+    if state.get("step_summaries"):
+        prompt_lines.append("Previously completed step summaries:")
+        for i, summary in enumerate(state.get("step_summaries", []), 1):
+            prompt_lines.append(f"{i}. {summary}")
+        prompt_lines.append("\n")
+
+    last_tool_result = state.get("last_tool_result")
+    if last_tool_result:
+        prompt_lines.append("Last tool result:")
+        prompt_lines.append(last_tool_result)
+        prompt_lines.append("\n")
+
+    last_user_intervention = state.get("last_user_intervention")
+    if last_user_intervention:
+        prompt_lines.append("User intervention instruction:")
+        prompt_lines.append(last_user_intervention)
+        prompt_lines.append("\n")
+
+    prompt_lines.extend(
+        [
+            "Respond using the exact format below:",
+            "<thought>Your reasoning here</thought>",
+            "<tool name='tool_name'>JSON arguments here</tool>",
+            "If no tool call is needed, return only <thought>...</thought> and omit the tool tag or use an empty tool name.",
+        ]
+    )
+
+    return "\n".join(prompt_lines)
+
+
+def build_file_tree(dir_path, base_path, current_depth=0, max_depth=5):
+    if current_depth > max_depth:
+        return []
     tree = []
     try:
         for entry in sorted(os.listdir(dir_path)):
@@ -93,6 +194,15 @@ def build_file_tree(dir_path, base_path):
                 ".venv",
                 ".git",
                 "task_state.json",
+                "node_modules",
+                ".next",
+                "dist",
+                "build",
+                ".idea",
+                ".vscode",
+                ".sass-cache",
+                ".mypy_cache",
+                ".cache",
             ):
                 continue
             full_path = os.path.join(dir_path, entry)
@@ -105,7 +215,7 @@ def build_file_tree(dir_path, base_path):
                 "type": "directory" if is_dir else "file",
             }
             if is_dir:
-                node["children"] = build_file_tree(full_path, base_path)
+                node["children"] = build_file_tree(full_path, base_path, current_depth + 1, max_depth)
             tree.append(node)
     except Exception as e:
         pass
@@ -119,16 +229,33 @@ def run_agent_step_sync(
     task_id, action="approve", modified_tool=None, user_prompt=None
 ):
     """
-    Executes a single step for the agent.
-    If action is 'approve' or 'modify', it runs the proposed/modified tool, logs the result,
-    sends history to Ollama, and parses the next proposed tool.
-    If action is 'inject', it appends the user prompt (intervention instruction) and queries Ollama.
+    Executes a single step for the agent in the multi-stage flow.
     """
     state = load_task_state(task_id)
     if not state:
         return {"error": "Task not found"}
 
-    if state["status"] not in ("running", "awaiting_intervention", "auto", "processando"):
+    if "stage" not in state:
+        state["stage"] = "improving_prompt"
+        state["improved_prompt"] = None
+        state["plan"] = None
+        state["steps"] = []
+        state["current_step_idx"] = 0
+        state["completed_step_summaries"] = []
+
+    if "step_summaries" not in state:
+        state["step_summaries"] = []
+    if "last_tool_result" not in state:
+        state["last_tool_result"] = None
+    if "last_user_intervention" not in state:
+        state["last_user_intervention"] = None
+
+    if state["status"] not in (
+        "running",
+        "awaiting_intervention",
+        "auto",
+        "processando",
+    ):
         if action != "inject":
             return state
         if state["status"] in ("completed", "failed"):
@@ -147,149 +274,360 @@ def run_agent_step_sync(
     executor = ToolExecutor(workspace_path)
     client = OllamaClient(base_url=state.get("ollama_url", OLLAMA_URL))
 
-    messages = state["messages"]
-    execution_log = state["execution_log"]
-    errors_encountered = state["errors_encountered"]
-    step = state["step"]
-    max_steps = state["max_steps"]
+    agent = MariaAgent(workspace_path, MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL))
 
-    # 1. Handle previous tool execution/input injection
-    tool_result = None
-    applied_action_descr = ""
-
-    if action == "approve" and state.get("proposed_tool"):
-        tool_name = state["proposed_tool"]["name"]
-        args = state["proposed_tool"]["args"]
-        applied_action_descr = f"Approved & Executed: {tool_name} {args}"
-
-        # Execute tool
-        tool_result = execute_tool_call(executor, tool_name, args)
-
-    elif action == "modify" and modified_tool:
-        tool_name = modified_tool.get("name")
-        args = modified_tool.get("args", {})
-        applied_action_descr = f"Modified & Executed: {tool_name} {args}"
-
-        # Execute modified tool
-        tool_result = execute_tool_call(executor, tool_name, args)
-
-    elif action == "inject" and user_prompt:
-        wrapped_prompt = format_task_prompt(user_prompt)
-        applied_action_descr = f"User Intervention / Prompt: {user_prompt}"
-        # Inject the user instruction directly as a user turn
-        messages.append(
-            {
-                "role": "user",
-                "content": f"USER INTERVENTION / INSTRUCTION:\n{wrapped_prompt}",
-            }
-        )
-        execution_log.append(
-            {"step": step, "role": "user_intervention", "content": wrapped_prompt}
-        )
-
-    # Process tool results if we ran a tool
-    if tool_result is not None:
-        if tool_result.startswith("Error:"):
-            errors_encountered.append(
-                {"step": step, "tool": tool_name, "args": args, "error": tool_result}
-            )
-
-        # Append assistant turn and tool results to messages
-        # Note: we only append assistant response if not already appended
-        # In typical flow, we appended assistant message in the previous step after generation.
-        # But we need to make sure we don't duplicate. Let's make sure the last message matches
-        # state["last_raw_response"] or we append it.
-        last_resp = state.get("last_raw_response")
-        if last_resp and (not messages or messages[-1]["content"] != last_resp):
-            messages.append({"role": "assistant", "content": last_resp})
-
-        messages.append({"role": "user", "content": f"TOOL RESULT:\n{tool_result}"})
-        execution_log.append(
-            {"step": step, "role": "tool_result", "content": tool_result}
-        )
-
-    # Clear proposed tool since it's processed
-    state["proposed_tool"] = None
-
-    # Check if max steps exceeded
-    if step >= max_steps:
-        state["status"] = "failed"
-        state["details"] = f"Reached maximum execution steps ({max_steps})."
-        save_task_state(task_id, state)
-        trigger_self_improvement(task_id, state)
-        return state
-
-    # 2. Call LLM for the next turn
-    next_step = step + 1
-    state["step"] = next_step
-
+    # Load memories
     try:
-        response_text = client.chat(messages, temperature=0.1)
+        base_prompt = load_system_prompt(MEMORY_DIR)
+    except Exception:
+        base_prompt = "You are Maria, an agentic coding assistant. Use TDD."
+        
+    lessons = load_lessons(MEMORY_DIR)
+    lessons_prompt = ""
+    if lessons:
+        lessons_prompt = "\n\nCRITICAL: Lessons learned from previous runs to prevent repeating mistakes:\n"
+        for i, l in enumerate(lessons, 1):
+            lessons_prompt += f"Lesson {i}: {l['title']}\n"
+            if l.get("error"):
+                lessons_prompt += f"  Previous Error: {l['error']}\n"
+            lessons_prompt += f"  Correction/Resolution: {l['resolution']}\n"
+    system_message = base_prompt + lessons_prompt
+
+    # Handle user intervention injection
+    if action == "inject" and user_prompt:
+        state["execution_log"].append({
+            "step": state["step"],
+            "role": "user_intervention",
+            "content": user_prompt
+        })
+        state["last_user_intervention"] = user_prompt
+        if state["stage"] == "executing_steps" and state.get("messages"):
+            state["messages"].append({
+                "role": "user",
+                "content": f"USER INTERVENTION / INSTRUCTION:\n{user_prompt}"
+            })
+
+    # State Machine
+    if state["stage"] == "improving_prompt":
+        try:
+            improved = agent.improve_prompt(state["task"], lessons)
+            state["improved_prompt"] = improved
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": f"💡 Stage 1 Complete: Improved Prompt:\n{improved}"
+            })
+            
+            # Transition to generating plan
+            state["stage"] = "generating_plan"
+            state["proposed_tool"] = {
+                "name": "generate_plan",
+                "args": {},
+                "thought": "Let's generate the complete implementation plan based on the improved prompt."
+            }
+            if state["mode"] != "auto":
+                state["status"] = "awaiting_intervention"
+            else:
+                state["status"] = "running"
+        except Exception as e:
+            state["status"] = "failed"
+            state["details"] = f"Failed to improve prompt: {e}"
+
+    elif state["stage"] == "generating_plan":
+        try:
+            plan = agent.generate_plan(state["improved_prompt"])
+            state["plan"] = plan
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": f"📋 Stage 2 Complete: Complete Plan:\n{plan}"
+            })
+            
+            # Save plan.md for compatibility
+            try:
+                plan_dir, _ = ensure_task_plan_dirs(workspace_path)
+                with open(os.path.join(plan_dir, "plan.md"), "w", encoding="utf-8") as f:
+                    f.write(plan)
+            except Exception:
+                pass
+
+            # Transition to creating steps
+            state["stage"] = "creating_steps"
+            state["proposed_tool"] = {
+                "name": "create_steps",
+                "args": {},
+                "thought": "Let's break the implementation plan down into sequential steps."
+            }
+            if state["mode"] != "auto":
+                state["status"] = "awaiting_intervention"
+            else:
+                state["status"] = "running"
+        except Exception as e:
+            state["status"] = "failed"
+            state["details"] = f"Failed to generate plan: {e}"
+
+    elif state["stage"] == "creating_steps":
+        try:
+            steps = agent.create_steps(state["plan"])
+            state["steps"] = steps
+            steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": f"🛠️ Stage 3 Complete: Execution Steps:\n{steps_str}"
+            })
+            
+            if not steps:
+                raise ValueError("No steps were generated by the LLM.")
+
+            # Transition to executing steps
+            state["stage"] = "executing_steps"
+            state["current_step_idx"] = 0
+            state["completed_step_summaries"] = []
+            
+            state["proposed_tool"] = {
+                "name": "execute_step",
+                "args": {"step_num": 1, "description": steps[0]},
+                "thought": f"Let's begin executing step 1 of {len(steps)}: {steps[0]}"
+            }
+            if state["mode"] != "auto":
+                state["status"] = "awaiting_intervention"
+            else:
+                state["status"] = "running"
+        except Exception as e:
+            state["status"] = "failed"
+            state["details"] = f"Failed to create steps: {e}"
+
+    elif state["stage"] == "executing_steps":
+        steps = state["steps"]
+        curr_idx = state["current_step_idx"]
+        step_num = curr_idx + 1
+        total_steps = len(steps)
+        last_proposed = state.get("proposed_tool")
+        
+        # If initializing step
+        if not state.get("messages") or (last_proposed and last_proposed.get("name") == "execute_step" and action == "approve"):
+            completed_context = ""
+            if state["completed_step_summaries"]:
+                completed_context = "\nPreviously completed steps:\n"
+                for idx, summary in enumerate(state["completed_step_summaries"], 1):
+                    completed_context += f"Step {idx}: {summary}\n"
+            
+            state["messages"] = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": f"""We are executing a multi-stage plan.
+Complete Plan:
+{state["plan"]}
+{completed_context}
+Current Step: Step {step_num} of {total_steps}
+Step Description: {steps[curr_idx]}
+
+Your objective is to complete ONLY this step using your tools.
+When you believe this step is fully complete, call the 'finish_task' tool with a summary of what you did.
+"""}
+            ]
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": f"🎬 Starting Step {step_num}/{total_steps}: {steps[curr_idx]}"
+            })
+            state["last_tool_result"] = None
+            state["last_user_intervention"] = None
+
+            # Get first tool proposal
+            state = run_llm_for_tool(state, client)
+        
+        else:
+            # Step in progress
+            tool_result = None
+            applied_action_descr = ""
+
+            if action == "approve" and last_proposed:
+                tool_name = last_proposed.get("name")
+                args = last_proposed.get("args", {})
+                if tool_name:
+                    applied_action_descr = f"Approved & Executed: {tool_name} {args}"
+                    tool_result = execute_tool_call(executor, tool_name, args)
+                else:
+                    applied_action_descr = "Approved & continued"
+
+            elif action == "modify" and modified_tool:
+                tool_name = modified_tool.get("name")
+                args = modified_tool.get("args", {})
+                applied_action_descr = f"Modified & Executed: {tool_name} {args}"
+                tool_result = execute_tool_call(executor, tool_name, args)
+
+            if tool_result is not None:
+                if tool_result.startswith("Error:"):
+                    state["errors_encountered"].append({
+                        "step": state["step"],
+                        "tool": tool_name,
+                        "args": args,
+                        "error": tool_result
+                    })
+                state["last_tool_result"] = tool_result
+                
+                try:
+                    summary_text = tool_result
+                    if len(summary_text) > 1200:
+                        summary_text = summary_text[:1200] + "\n\n[truncated]"
+                    save_step_summary(workspace_path, state["step"], f"{applied_action_descr}\n\n{summary_text}")
+                except Exception:
+                    pass
+
+                last_resp = state.get("last_raw_response")
+                if last_resp and (not state["messages"] or state["messages"][-1]["content"] != last_resp):
+                    state["messages"].append({"role": "assistant", "content": last_resp})
+                
+                state["messages"].append({"role": "user", "content": f"TOOL RESULT:\n{tool_result}"})
+                state["execution_log"].append({
+                    "step": state["step"],
+                    "role": "tool_result",
+                    "content": tool_result
+                })
+
+            # Get next tool proposal
+            state = run_llm_for_tool(state, client)
+
+    elif state["stage"] == "verifying":
+        try:
+            verdict, report = agent.verify_execution(state["plan"], state["steps"])
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": f"🔍 Stage 5 Complete: Final Verification Report:\n{report}\n\nVerdict: {verdict}"
+            })
+            
+            try:
+                with open(os.path.join(workspace_path, "verification_report.md"), "w", encoding="utf-8") as f:
+                    f.write(f"# Verification Report\n\nVerdict: {verdict}\n\n{report}")
+            except Exception:
+                pass
+
+            state["proposed_tool"] = None
+            if verdict == "SUCCESS":
+                state["status"] = "completed"
+                state["details"] = report
+                try:
+                    add_task_history(MEMORY_DIR, state["task"], "SUCCESS", report[:200])
+                except Exception:
+                    pass
+            else:
+                state["status"] = "failed"
+                state["details"] = f"Verification failed. Verdict: {verdict}"
+                try:
+                    add_task_history(MEMORY_DIR, state["task"], "FAILED", f"Verdict: {verdict}")
+                except Exception:
+                    pass
+
+            trigger_self_improvement(task_id, state)
+        except Exception as e:
+            state["status"] = "failed"
+            state["details"] = f"Failed to verify execution: {e}"
+            trigger_self_improvement(task_id, state)
+
+    save_task_state(task_id, state)
+    return state
+
+
+def run_llm_for_tool(state, client):
+    """
+    Helper function to query LLM for the next tool call during step execution.
+    Handles finish_task to transition steps or stages.
+    """
+    state["step"] += 1
+    try:
+        response_text = client.chat(state["messages"], temperature=0.1)
     except Exception as e:
         err_msg = f"LLM error: {e}"
-        errors_encountered.append(
-            {"step": next_step, "type": "llm_error", "message": err_msg}
-        )
+        state["errors_encountered"].append({
+            "step": state["step"],
+            "type": "llm_error",
+            "message": err_msg
+        })
         state["status"] = "failed"
         state["details"] = err_msg
-        save_task_state(task_id, state)
-        trigger_self_improvement(task_id, state)
         return state
 
-    # Log assistant response
-    execution_log.append(
-        {"step": next_step, "role": "assistant", "content": response_text}
-    )
     state["last_raw_response"] = response_text
+    state["execution_log"].append({
+        "step": state["step"],
+        "role": "assistant",
+        "content": response_text
+    })
 
-    # Parse response
     thought, tool_name, args = parse_agent_response(response_text)
 
-    # Handle response types
     if not tool_name:
+        if thought:
+            state["messages"].append({"role": "assistant", "content": response_text})
+            state["proposed_tool"] = {"name": None, "args": {}, "thought": thought}
+            if state.get("mode") != "auto":
+                state["status"] = "awaiting_intervention"
+            else:
+                state["status"] = "running"
+            return state
+
         err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
-        errors_encountered.append(
-            {"step": next_step, "type": "format_error", "message": err_msg}
-        )
-        messages.append({"role": "assistant", "content": response_text})
-        messages.append({"role": "user", "content": f"ERROR:\n{err_msg}"})
-        execution_log.append(
-            {"step": next_step, "role": "tool_result", "content": f"ERROR: {err_msg}"}
-        )
-        state["status"] = "awaiting_intervention"
-        state["proposed_tool"] = {
-            "name": "",
-            "args": {},
-            "thought": thought or "Formatting error detected.",
-            "error": err_msg,
-        }
-    elif tool_name == "finish_task":
-        summary = args.get("summary", "Task finished.")
-        state["status"] = "completed"
-        state["details"] = summary
+        state["errors_encountered"].append({
+            "step": state["step"],
+            "type": "format_error",
+            "message": err_msg
+        })
+        state["messages"].append({"role": "assistant", "content": response_text})
+        state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
+        state["execution_log"].append({
+            "step": state["step"],
+            "role": "tool_result",
+            "content": f"ERROR: {err_msg}"
+        })
+        state["status"] = "running"
         state["proposed_tool"] = None
-        # Add to message list
-        messages.append({"role": "assistant", "content": response_text})
-        # Record task history
-        try:
-            add_task_history(MEMORY_DIR, state["task"], "SUCCESS", summary)
-        except Exception as e:
-            pass
-        save_task_state(task_id, state)
-        trigger_self_improvement(task_id, state)
         return state
+
+    elif tool_name == "finish_task":
+        summary = args.get("summary", "Step completed.")
+        curr_idx = state["current_step_idx"]
+        step_desc = state["steps"][curr_idx]
+        state["completed_step_summaries"].append(f"{step_desc} -> {summary}")
+        state["execution_log"].append({
+            "step": state["step"],
+            "role": "system",
+            "content": f"✅ Step {curr_idx + 1} Complete: {summary}"
+        })
+
+        next_idx = curr_idx + 1
+        if next_idx < len(state["steps"]):
+            state["current_step_idx"] = next_idx
+            state["proposed_tool"] = {
+                "name": "execute_step",
+                "args": {"step_num": next_idx + 1, "description": state["steps"][next_idx]},
+                "thought": f"Let's begin executing step {next_idx + 1} of {len(state['steps'])}: {state['steps'][next_idx]}"
+            }
+            if state.get("mode") != "auto":
+                state["status"] = "awaiting_intervention"
+            else:
+                state["status"] = "running"
+        else:
+            state["stage"] = "verifying"
+            state["proposed_tool"] = {
+                "name": "verify_execution",
+                "args": {},
+                "thought": "All steps are completed. Let's perform the final audit and verification of all generated files."
+            }
+            if state.get("mode") != "auto":
+                state["status"] = "awaiting_intervention"
+            else:
+                state["status"] = "running"
+        return state
+
     else:
-        # A valid tool proposed
         state["proposed_tool"] = {"name": tool_name, "args": args, "thought": thought}
-        # In non-auto mode, pause for user intervention
         if state.get("mode") != "auto":
             state["status"] = "awaiting_intervention"
         else:
             state["status"] = "running"
-
-    # Save the updated state
-    save_task_state(task_id, state)
-    return state
+        return state
 
 
 def execute_tool_call(executor, name, args):
@@ -349,7 +687,11 @@ def background_execution_loop(task_id):
                     break
             state = run_agent_step_sync(task_id, action="approve")
 
-        if not state or state["status"] in ("completed", "failed", "awaiting_intervention"):
+        if not state or state["status"] in (
+            "completed",
+            "failed",
+            "awaiting_intervention",
+        ):
             break
 
         time.sleep(0.5)
@@ -495,47 +837,40 @@ def create_task():
     with open(os.path.join(task_path, "task_info.html"), "w", encoding="utf-8") as f:
         f.write(info_html)
 
-    # 3. Load prompt/lessons
-    try:
-        base_prompt = load_system_prompt(MEMORY_DIR)
-    except Exception:
-        base_prompt = "You are Maria, an agentic coding assistant. Use TDD."
-
-    lessons = load_lessons(MEMORY_DIR)
-    lessons_prompt = ""
-    if lessons:
-        lessons_prompt = "\n\nCRITICAL: Lessons learned from previous runs to prevent repeating mistakes:\n"
-        for i, l in enumerate(lessons, 1):
-            lessons_prompt += f"Lesson {i}: {l['title']}\n"
-            if l.get("error"):
-                lessons_prompt += f"  Previous Error: {l['error']}\n"
-            lessons_prompt += f"  Correction/Resolution: {l['resolution']}\n"
-
-    system_message = base_prompt + lessons_prompt
-
-    # 4. Formulate state
+    # 3. Formulate state
     state = {
         "task_id": task_id,
         "task": task_prompt,
         "created_at": created_time_str,
         "mode": mode,
         "status": "running" if mode == "auto" else "awaiting_intervention",
+        "stage": "improving_prompt",
         "step": 0,
         "max_steps": max_steps,
         "ollama_url": OLLAMA_URL,
-        "messages": [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": format_task_prompt(task_prompt)},
-        ],
+        "messages": [],
         "execution_log": [
-            {"step": 0, "role": "system", "content": f"Initialized task: {task_prompt}"}
+            {"step": 0, "role": "system", "content": f"Initialized task: {task_prompt}. Stage: Improving user prompt."}
         ],
         "errors_encountered": [],
-        "proposed_tool": None,
+        "proposed_tool": {
+            "name": "improve_prompt",
+            "args": {},
+            "thought": "Let's begin by improving the user prompt using the LLM."
+        },
         "last_raw_response": None,
+        "step_summaries": [],
+        "last_tool_result": None,
+        "last_user_intervention": None,
+        "improved_prompt": None,
+        "plan": None,
+        "steps": [],
+        "current_step_idx": 0,
+        "completed_step_summaries": [],
     }
 
     save_task_state(task_id, state)
+    save_plan_overview(task_path, task_prompt, created_time_str)
 
     # 5. Handle initial execution based on mode
     if mode == "auto":
@@ -544,9 +879,6 @@ def create_task():
         thread.daemon = True
         thread.start()
         active_threads[task_id] = thread
-    else:
-        # Step mode: Run first step to generate the first proposed tool call
-        state = run_agent_step_sync(task_id, action="inject", user_prompt=None)
 
     return jsonify(state)
 
@@ -720,4 +1052,10 @@ def manage_lessons():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    # Disable debug/reloader when running in production or under PM2.
+    # We also disable the auto-reloader (use_reloader=False) to prevent loop restarts
+    # when the agent writes workspace or memory files.
+    flask_env = os.environ.get("FLASK_ENV", "development")
+    debug_mode = flask_env == "development" and os.environ.get("DEBUG", "1") == "1"
+    app.run(host="0.0.0.0", port=5002, debug=debug_mode, use_reloader=False)
+

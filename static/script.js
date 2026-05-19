@@ -1,11 +1,39 @@
 let currentTaskId = null;
 let activePollingInterval = null;
 let editingFilePath = null;
+let executionLogAutoScroll = true;
+let expandedLogEntries = {};
+let renderedLogEntries = {};
+
+// Caching and state variables for performance optimization
+let lastTasksListJson = null;
+let lastFileTreeJson = null;
+let expandedFolders = {};
+let lastTaskDetailsJson = null;
+let activeTaskStatus = null;
+let lastRenderedStatus = null;
+
+function isExecutionLogAtBottom() {
+  const container = document.getElementById("execution-log");
+  if (!container) return true;
+  const threshold = 20;
+  return (
+    container.scrollHeight - container.scrollTop - container.clientHeight <=
+    threshold
+  );
+}
 
 // On Load
 document.addEventListener("DOMContentLoaded", () => {
   refreshDashboard();
   loadTasksList();
+
+  const logContainer = document.getElementById("execution-log");
+  if (logContainer) {
+    logContainer.addEventListener("scroll", () => {
+      executionLogAutoScroll = isExecutionLogAtBottom();
+    });
+  }
 
   // Periodically refresh list & active task log
   setInterval(() => {
@@ -23,6 +51,17 @@ async function loadTasksList() {
   try {
     const res = await fetch("/api/tasks");
     const tasks = await res.json();
+
+    // Update activeTaskStatus first
+    const activeTask = tasks.find(t => t.task_id === currentTaskId);
+    activeTaskStatus = activeTask ? activeTask.status : null;
+
+    const tasksJson = JSON.stringify(tasks);
+    const cacheKey = `${currentTaskId}|${tasksJson}`;
+    if (cacheKey === lastTasksListJson) {
+      return; // Skip DOM rebuild if task list and active task selection are unchanged
+    }
+    lastTasksListJson = cacheKey;
 
     const listEl = document.getElementById("tasks-list");
     listEl.innerHTML = "";
@@ -80,6 +119,11 @@ async function refreshDashboard() {
 // Select task from sidebar
 async function selectTask(taskId) {
   currentTaskId = taskId;
+  renderedLogEntries = {};
+  executionLogAutoScroll = true;
+  lastTaskDetailsJson = null;
+  lastFileTreeJson = null;
+  expandedFolders = {}; // clear folders state when switching tasks
   closeEditor();
 
   document.getElementById("welcome-view").style.display = "none";
@@ -100,6 +144,13 @@ async function getTaskDetails(taskId) {
     const res = await fetch(`/api/tasks/${taskId}`);
     if (!res.ok) throw new Error();
     const task = await res.json();
+
+    const detailsJson = JSON.stringify(task);
+    if (detailsJson === lastTaskDetailsJson) {
+      return;
+    }
+    lastTaskDetailsJson = detailsJson;
+    lastRenderedStatus = task.status;
 
     // Update header info
     document.getElementById("active-task-desc").innerText = task.task;
@@ -152,8 +203,17 @@ async function getTaskDetails(taskId) {
             2,
           );
 
-          document.getElementById("btn-approve-tool").style.display = "flex";
+          const approveBtn = document.getElementById("btn-approve-tool");
+          approveBtn.innerText = "Approve & Step";
+          approveBtn.style.display = "flex";
           document.getElementById("btn-modify-tool").style.display = "flex";
+        } else if (proposed.thought) {
+          // A plan-only response: let user continue to next execution turn
+          proposedEl.style.display = "none";
+          const approveBtn = document.getElementById("btn-approve-tool");
+          approveBtn.innerText = "Continue";
+          approveBtn.style.display = "flex";
+          document.getElementById("btn-modify-tool").style.display = "none";
         } else {
           // Formatting error or system prompt turn
           proposedEl.style.display = "none";
@@ -172,6 +232,8 @@ async function getTaskDetails(taskId) {
   } catch (err) {
     console.error("Error loading task details", err);
     currentTaskId = null;
+    lastTaskDetailsJson = null;
+    lastFileTreeJson = null;
     document.getElementById("welcome-view").style.display = "flex";
     document.getElementById("task-view").style.display = "none";
   }
@@ -180,7 +242,14 @@ async function getTaskDetails(taskId) {
 // Active task polling during execution
 async function pollActiveTaskState() {
   if (!currentTaskId) return;
-  getTaskDetails(currentTaskId);
+  // Poll if the task is actively running, or if we haven't loaded it, or if the status in the sidebar differs from what we last rendered
+  const statusNeedsPoll = activeTaskStatus === "running" || 
+                          activeTaskStatus === "processando" || 
+                          activeTaskStatus !== lastRenderedStatus || 
+                          !lastTaskDetailsJson;
+  if (statusNeedsPoll) {
+    await getTaskDetails(currentTaskId);
+  }
 }
 
 // Render logs
@@ -192,13 +261,82 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;");
 }
 
+function renderCollapsibleText(text) {
+  return `<div class="log-collapsible-text">${text}</div>`;
+}
+
+function stripHtmlTags(text) {
+  return text.replace(/<[^>]+>/g, "");
+}
+
+function getLogEntryKey(entry) {
+  const rawContent = entry.content || "";
+  return `${entry.role || ""}|${entry.step || ""}|${rawContent.slice(0, 200)}`;
+}
+
+function renderCardBody(entry) {
+  const rawContent = entry.content || "";
+  const contentHtml = renderLogContent(entry);
+  const entryKey = getLogEntryKey(entry);
+  const isExpanded = Boolean(expandedLogEntries[entryKey]);
+
+  if (rawContent.length <= 300) {
+    return contentHtml;
+  }
+
+  const previewText = stripHtmlTags(rawContent).slice(0, 300);
+  const preview = `${escapeHtml(previewText)}...`;
+  return `
+    <div class="log-collapsible-card">
+      <div class="log-collapsible-preview" style="display: ${isExpanded ? "none" : "block"};">${preview}</div>
+      <button type="button" class="log-expand-btn" onclick="toggleLogExpand(this)" data-expanded="${isExpanded}" data-entry-key="${encodeURIComponent(entryKey)}">${isExpanded ? "Recolher" : "Expandir"}</button>
+      <div class="log-collapsible-full" style="display: ${isExpanded ? "block" : "none"};">${contentHtml}</div>
+    </div>
+  `;
+}
+
+function toggleLogExpand(button) {
+  const container = button.closest(".log-collapsible-card");
+  if (!container) return;
+
+  const preview = container.querySelector(".log-collapsible-preview");
+  const full = container.querySelector(".log-collapsible-full");
+  const entryKey = decodeURIComponent(button.dataset.entryKey || "");
+  const expanded = button.dataset.expanded === "true";
+
+  if (expanded) {
+    preview.style.display = "block";
+    full.style.display = "none";
+    button.innerText = "Expandir";
+    button.dataset.expanded = "false";
+    if (entryKey) delete expandedLogEntries[entryKey];
+  } else {
+    preview.style.display = "none";
+    full.style.display = "block";
+    button.innerText = "Recolher";
+    button.dataset.expanded = "true";
+    if (entryKey) expandedLogEntries[entryKey] = true;
+  }
+}
+
 function renderExecutionLogs(log) {
   const container = document.getElementById("execution-log");
+  if (!container) return;
   if (!Array.isArray(log)) log = [];
 
-  container.innerHTML = "";
+  if (container.dataset.taskId !== currentTaskId) {
+    renderedLogEntries = {};
+    container.dataset.taskId = currentTaskId || "";
+    container.innerHTML = "";
+  }
+
+  const preserveScrollTop = container.scrollTop;
 
   log.forEach((entry) => {
+    const entryKey = getLogEntryKey(entry);
+    if (renderedLogEntries[entryKey]) return;
+    renderedLogEntries[entryKey] = true;
+
     const card = document.createElement("div");
     card.className = `log-card log-role-${entry.role}`;
 
@@ -215,13 +353,17 @@ function renderExecutionLogs(log) {
                 <span>${icon} ${titleRole} (Step ${entry.step || "-"})</span>
             </div>
             <div class="log-card-body">
-                ${renderLogContent(entry)}
+                ${renderCardBody(entry)}
             </div>
         `;
     container.appendChild(card);
   });
 
-  container.scrollTop = container.scrollHeight;
+  if (executionLogAutoScroll) {
+    container.scrollTop = container.scrollHeight;
+  } else {
+    container.scrollTop = preserveScrollTop;
+  }
 }
 
 function renderLogContent(entry) {
@@ -236,7 +378,9 @@ function renderLogContent(entry) {
       rawContent.match(/<thought>([\s\S]*?)<\/thought>/i) ||
       rawContent.match(/<thought>([\s\S]*?)(?:<tool|\Z)/i);
     if (thoughtMatch) {
-      thoughtHtml = `<div class="log-thought">${escapeHtml(thoughtMatch[1].trim())}</div>`;
+      thoughtHtml = `<div class="log-thought">${renderCollapsibleText(
+        escapeHtml(thoughtMatch[1].trim()),
+      )}</div>`;
     }
 
     const toolMatch = rawContent.match(
@@ -249,27 +393,33 @@ function renderLogContent(entry) {
       toolHtml = `
                 <div class="log-tool-call">
                     <div class="log-tool-title"><i class="fa-solid fa-wrench"></i> Tool Action: ${escapeHtml(toolName)}</div>
-                    <div class="log-tool-args">${argsBlock}</div>
+                    <div class="log-tool-args">${renderCollapsibleText(argsBlock)}</div>
                 </div>
             `;
     }
 
     if (!thoughtHtml && !toolHtml) {
-      return `<div class="log-thought">${content}</div>`;
+      return `<div class="log-thought">${renderCollapsibleText(content)}</div>`;
     }
 
     return thoughtHtml + toolHtml;
   }
 
   if (entry.role === "tool_result") {
-    return `<pre class="log-pre">${content}</pre>`;
+    return `<div class="log-thought log-tool-result-text">${renderCollapsibleText(content)}</div>`;
   }
 
-  return `<div style="font-size: 14px; line-height: 1.5;">${content}</div>`;
+  return `<div style="font-size: 14px; line-height: 1.5;">${renderCollapsibleText(content)}</div>`;
 }
 
 // Render Workspace File Tree
 function renderFileTree(nodes) {
+  const fileTreeJson = JSON.stringify(nodes);
+  if (fileTreeJson === lastFileTreeJson) {
+    return; // File tree hasn't changed, skip rebuilding DOM
+  }
+  lastFileTreeJson = fileTreeJson;
+
   const container = document.getElementById("file-tree");
   container.innerHTML = "";
 
@@ -291,33 +441,42 @@ function buildTreeNodeList(nodes) {
     li.className = "tree-node";
 
     const isDir = node.type === "directory";
-    const icon = isDir
-      ? '<i class="fa-solid fa-folder tree-icon-folder"></i>'
-      : '<i class="fa-solid fa-file-code tree-icon-file"></i>';
-
-    const item = document.createElement("div");
-    item.className = `tree-item ${editingFilePath === node.path ? "active" : ""}`;
-    item.innerHTML = `${icon} <span>${node.name}</span>`;
 
     if (isDir) {
-      item.onclick = (e) => {
-        e.stopPropagation();
-        const childContainer = li.querySelector(".tree-children");
-        if (childContainer.style.display === "none") {
-          childContainer.style.display = "block";
-          item.querySelector(".tree-icon-folder").className =
-            "fa-solid fa-folder-open tree-icon-folder";
-        } else {
-          childContainer.style.display = "none";
-          item.querySelector(".tree-icon-folder").className =
-            "fa-solid fa-folder tree-icon-folder";
-        }
-      };
-      li.appendChild(item);
+      const isExpanded = !!expandedFolders[node.path];
+      const folderIconClass = isExpanded
+        ? "fa-solid fa-folder-open tree-icon-folder"
+        : "fa-solid fa-folder tree-icon-folder";
+
+      const item = document.createElement("div");
+      item.className = `tree-item ${editingFilePath === node.path ? "active" : ""}`;
+      item.innerHTML = `<i class="${folderIconClass}"></i> <span>${node.name}</span>`;
 
       const subUl = buildTreeNodeList(node.children);
+      subUl.style.display = isExpanded ? "block" : "none";
+
+      item.onclick = (e) => {
+        e.stopPropagation();
+        const currentlyExpanded = expandedFolders[node.path];
+        if (currentlyExpanded) {
+          expandedFolders[node.path] = false;
+          subUl.style.display = "none";
+          item.querySelector(".tree-icon-folder").className =
+            "fa-solid fa-folder tree-icon-folder";
+        } else {
+          expandedFolders[node.path] = true;
+          subUl.style.display = "block";
+          item.querySelector(".tree-icon-folder").className =
+            "fa-solid fa-folder-open tree-icon-folder";
+        }
+      };
+
+      li.appendChild(item);
       li.appendChild(subUl);
     } else {
+      const item = document.createElement("div");
+      item.className = `tree-item ${editingFilePath === node.path ? "active" : ""}`;
+      item.innerHTML = `<i class="fa-solid fa-file-code tree-icon-file"></i> <span>${node.name}</span>`;
       item.onclick = (e) => {
         e.stopPropagation();
         openFileEditor(node.path);
@@ -453,8 +612,10 @@ async function submitIntervention(action) {
     payload.user_prompt = userPrompt;
   }
 
-  // Clear input fields
-  document.getElementById("intervention-prompt").value = "";
+  // Clear prompt only after a user-inject action so typed instructions are not lost during approve/modify actions.
+  if (action === "inject") {
+    document.getElementById("intervention-prompt").value = "";
+  }
 
   try {
     // Show loading indicator

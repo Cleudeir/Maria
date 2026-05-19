@@ -27,7 +27,7 @@ class OllamaClient:
             payload["options"]["stop"] = stop
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers, timeout=600)
+            response = requests.post(url, json=payload, headers=self.headers, timeout=1800)
             response.raise_for_status()
             data = response.json()
             return data.get("message", {}).get("content", "")
@@ -52,7 +52,7 @@ class OllamaClient:
             payload["system"] = system
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers, timeout=600)
+            response = requests.post(url, json=payload, headers=self.headers, timeout=1800)
             response.raise_for_status()
             data = response.json()
             return data.get("response", "")
