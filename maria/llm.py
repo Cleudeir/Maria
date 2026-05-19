@@ -27,6 +27,9 @@ class OllamaClient:
                 "num_ctx": 8192
             }
         }
+        print(f"[Ollama Queue] Sending request to {url} with model {self.model}")
+        print(f"Chat Message: {len(messages)} caractéres")
+
         if stop:
             payload["options"]["stop"] = stop
 

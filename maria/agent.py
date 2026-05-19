@@ -81,6 +81,8 @@ The plan must describe:
 3. Step-by-step implementation strategy
 4. Testing strategy (how to verify each component)
 
+Important: The plan should be descriptive only. Do not include code snippets, pseudocode, or direct implementation commands. Explain what to do, but do not write the code itself.
+
 Detailed Task Description:
 ---
 {improved_prompt}

@@ -85,7 +85,9 @@ def load_task_state(task_id):
 
 
 def save_task_state(task_id, state):
-    path = os.path.join(get_task_path(task_id), "task_state.json")
+    task_path = get_task_path(task_id)
+    os.makedirs(task_path, exist_ok=True)
+    path = os.path.join(task_path, "task_state.json")
     with get_task_lock(task_id):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
@@ -94,8 +96,9 @@ def save_task_state(task_id, state):
 def format_task_prompt(prompt):
     return (
         "Before starting implementation, first read the current project files and create "
-        "a clear, step-by-step plan. Only after you have the plan, begin implementing "
-        "code. Then follow the plan carefully.\n\n"
+        "a clear, step-by-step plan. The plan should explain and describe the approach only; "
+        "it must not include code snippets, pseudocode, or exact implementation text. "
+        "Only after you have the plan, begin implementing code. Then follow the plan carefully.\n\n"
         f"Instruction:\n{prompt}"
     )
 
@@ -562,10 +565,7 @@ def run_llm_for_tool(state, client):
         if thought:
             state["messages"].append({"role": "assistant", "content": response_text})
             state["proposed_tool"] = {"name": None, "args": {}, "thought": thought}
-            if state.get("mode") != "auto":
-                state["status"] = "awaiting_intervention"
-            else:
-                state["status"] = "running"
+            state["status"] = "awaiting_intervention"
             return state
 
         err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
@@ -581,7 +581,7 @@ def run_llm_for_tool(state, client):
             "role": "tool_result",
             "content": f"ERROR: {err_msg}"
         })
-        state["status"] = "running"
+        state["status"] = "awaiting_intervention"
         state["proposed_tool"] = None
         return state
 
@@ -674,7 +674,7 @@ def background_execution_loop(task_id):
 
         if not state.get("proposed_tool"):
             state = run_agent_step_sync(task_id, action="inject", user_prompt=None)
-            if not state or state["status"] != "running":
+            if not state or state["status"] != "running" or not state.get("proposed_tool"):
                 break
 
         proposed_tool = state.get("proposed_tool")
@@ -685,6 +685,10 @@ def background_execution_loop(task_id):
                     state["status"] = "awaiting_intervention"
                     save_task_state(task_id, state)
                     break
+            if proposed_tool.get("name") is None:
+                state["status"] = "awaiting_intervention"
+                save_task_state(task_id, state)
+                break
             state = run_agent_step_sync(task_id, action="approve")
 
         if not state or state["status"] in (
@@ -906,6 +910,22 @@ def post_task_action(task_id):
     # Synchronous Step/Intervention execution
     modified_tool = data.get("modified_tool")
     user_prompt = data.get("user_prompt")
+
+    if action == "resume_auto":
+        if state.get("mode") != "auto":
+            return jsonify({"error": "Task is not in auto mode"}), 400
+
+        state["status"] = "running"
+        save_task_state(task_id, state)
+
+        thread = active_threads.get(task_id)
+        if not thread or not thread.is_alive():
+            thread = threading.Thread(target=background_execution_loop, args=(task_id,))
+            thread.daemon = True
+            thread.start()
+            active_threads[task_id] = thread
+
+        return jsonify(state)
 
     # Temporary run agent step
     state = run_agent_step_sync(

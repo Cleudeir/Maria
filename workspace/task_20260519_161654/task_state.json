@@ -1,0 +1,39 @@
+{
+  "task_id": "task_20260519_161654",
+  "task": "create game snake",
+  "created_at": "2026-05-19 16:16:54",
+  "mode": "auto",
+  "status": "processando",
+  "stage": "generating_plan",
+  "step": 0,
+  "max_steps": 400,
+  "ollama_url": "http://localhost:11434",
+  "messages": [],
+  "execution_log": [
+    {
+      "step": 0,
+      "role": "system",
+      "content": "Initialized task: create game snake. Stage: Improving user prompt."
+    },
+    {
+      "step": 0,
+      "role": "system",
+      "content": "💡 Stage 1 Complete: Improved Prompt:\nAct as a Senior Game Developer specializing in web technologies. Your task is to design and implement a fully functional, polished version of the classic Snake game.\n\n**Objective:**\nCreate a single, self-contained HTML file that includes all necessary CSS and JavaScript to run the game in any modern browser without external dependencies.\n\n**Technical Stack:**\n- Language: Vanilla JavaScript (ES6+)\n- Rendering: HTML5 Canvas\n- Styling: CSS3 (responsive design)\n\n**Core Mechanics:**\n1. **Grid System:** The game board must be a grid of 20x20 cells.\n2. **Snake Movement:** The snake moves continuously based on the last key press. It grows by one segment when consuming food.\n3. **Food Generation:** Food must spawn at random coordinates.\n4. **Collision Detection:**\n   - Wall Collision: If the snake hits the canvas border, the game ends.\n   - Self Collision: If the snake's head hits any part of its own body, the game ends.\n5. **Controls:** Use Arrow Keys or WASD to control direction.\n6. **Game State:** Implement Start, Pause, and Restart functionality.\n\n**Edge Cases & Robustness:**\n1. **Input Buffering:** Implement an input queue to prevent the snake from reversing into itself (e.g., pressing 'Up' then 'Left' rapidly while moving 'Down' should not cause a self-collision).\n2. **Food Spawning:** Ensure food never spawns on top of the snake's body.\n3. **Game Loop:** Use `requestAnimationFrame` for smooth rendering, but throttle input processing to prevent logic errors during rapid key presses.\n4. **High Score:** Persist the high score in `localStorage`.\n\n**Testing & Validation Strategy:**\n1. **Unit Tests:** Include a `runTests()` function within the JavaScript that logs to the console. It must verify:\n   - The snake grows correctly when eating food.\n   - The snake dies when hitting walls.\n   - The snake dies when hitting itself.\n   - The input buffer prevents invalid direction changes.\n2. **Manual Verification:** Provide a checklist for the user to manually verify the game (e.g., \"Test that the game resets correctly after death\").\n3. **Code Quality:** Ensure the code is modular, commented, and follows best practices (e.g., separation of concerns between game logic and rendering).\n\n**Output Format:**\nProvide the complete code for the `index.html` file. Do not include explanations outside the code block. Ensure the code is copy-paste ready."
+    }
+  ],
+  "errors_encountered": [],
+  "proposed_tool": {
+    "name": "generate_plan",
+    "args": {},
+    "thought": "Let's generate the complete implementation plan based on the improved prompt."
+  },
+  "last_raw_response": null,
+  "step_summaries": [],
+  "last_tool_result": null,
+  "last_user_intervention": null,
+  "improved_prompt": "Act as a Senior Game Developer specializing in web technologies. Your task is to design and implement a fully functional, polished version of the classic Snake game.\n\n**Objective:**\nCreate a single, self-contained HTML file that includes all necessary CSS and JavaScript to run the game in any modern browser without external dependencies.\n\n**Technical Stack:**\n- Language: Vanilla JavaScript (ES6+)\n- Rendering: HTML5 Canvas\n- Styling: CSS3 (responsive design)\n\n**Core Mechanics:**\n1. **Grid System:** The game board must be a grid of 20x20 cells.\n2. **Snake Movement:** The snake moves continuously based on the last key press. It grows by one segment when consuming food.\n3. **Food Generation:** Food must spawn at random coordinates.\n4. **Collision Detection:**\n   - Wall Collision: If the snake hits the canvas border, the game ends.\n   - Self Collision: If the snake's head hits any part of its own body, the game ends.\n5. **Controls:** Use Arrow Keys or WASD to control direction.\n6. **Game State:** Implement Start, Pause, and Restart functionality.\n\n**Edge Cases & Robustness:**\n1. **Input Buffering:** Implement an input queue to prevent the snake from reversing into itself (e.g., pressing 'Up' then 'Left' rapidly while moving 'Down' should not cause a self-collision).\n2. **Food Spawning:** Ensure food never spawns on top of the snake's body.\n3. **Game Loop:** Use `requestAnimationFrame` for smooth rendering, but throttle input processing to prevent logic errors during rapid key presses.\n4. **High Score:** Persist the high score in `localStorage`.\n\n**Testing & Validation Strategy:**\n1. **Unit Tests:** Include a `runTests()` function within the JavaScript that logs to the console. It must verify:\n   - The snake grows correctly when eating food.\n   - The snake dies when hitting walls.\n   - The snake dies when hitting itself.\n   - The input buffer prevents invalid direction changes.\n2. **Manual Verification:** Provide a checklist for the user to manually verify the game (e.g., \"Test that the game resets correctly after death\").\n3. **Code Quality:** Ensure the code is modular, commented, and follows best practices (e.g., separation of concerns between game logic and rendering).\n\n**Output Format:**\nProvide the complete code for the `index.html` file. Do not include explanations outside the code block. Ensure the code is copy-paste ready.",
+  "plan": null,
+  "steps": [],
+  "current_step_idx": 0,
+  "completed_step_summaries": []
+}
