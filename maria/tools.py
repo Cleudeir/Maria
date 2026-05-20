@@ -140,7 +140,10 @@ class ToolExecutor:
             return "Error: Invalid path. Please specify a file path under the output directory."
 
         normalized_path = path
-        if not normalized_path.startswith("output" + os.sep) and normalized_path != "output":
+        if (
+            not normalized_path.startswith("output" + os.sep)
+            and normalized_path != "output"
+        ):
             normalized_path = os.path.join("output", normalized_path)
 
         if not is_path_safe(self.workspace_dir, normalized_path):
