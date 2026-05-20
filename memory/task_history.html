@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Maria - Task History</title>
+<style>
+        body {
+            font-family: 'Outfit', 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            padding: 40px;
+            max-width: 900px;
+            margin: auto;
+        }
+        h1 {
+            color: #6366f1;
+            border-bottom: 2px solid #334155;
+            padding-bottom: 10px;
+        }
+        .task-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #6366f1;
+        }
+        .task-card.success {
+            border-left-color: #10b981;
+        }
+        .task-card.failed {
+            border-left-color: #ef4444;
+        }
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .task-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #f8fafc;
+        }
+        .task-status {
+            font-weight: bold;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            text-transform: uppercase;
+        }
+        .status-success {
+            background-color: #064e3b;
+            color: #a7f3d0;
+        }
+        .status-failed {
+            background-color: #7f1d1d;
+            color: #fecaca;
+        }
+        .task-details {
+            font-size: 0.95em;
+            color: #cbd5e1;
+            line-height: 1.6;
+        }
+        .task-meta {
+            font-size: 0.8em;
+            color: #64748b;
+            margin-top: 15px;
+        }
+        #history-list {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+<h1>Maria Task History</h1>
+<div id="history-list">
+<!-- Task history entries will be appended here -->
+<div class="task-card failed"><div class="task-header"><div class="task-title">Create a function fibonacci(n) returning the N-th Fibonacci number. You MUST follow TDD: first write a test file named test_fib.py that fails, run it, then write the implementation in fib.py, run it and make it pass, and call finish_task. Use unittest or pytest.</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 1 steps. Errors: 1</div><div class="task-meta">Executed at: 2026-05-19 08:08:38</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Create a function fibonacci(n) returning the N-th Fibonacci number. You MUST follow TDD: first write a test file named test_fib.py that fails, run it, then write the implementation in fib.py, run it and make it pass, and call finish_task. Use unittest or pytest.</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 2 steps. Errors: 1</div><div class="task-meta">Executed at: 2026-05-19 08:13:52</div></div><div class="task-card success"><div class="task-header"><div class="task-title">Create a function fibonacci(n) returning the N-th Fibonacci number. You MUST follow TDD: first write a test file named test_fib.py that fails, run it, then write the implementation in fib.py, run it and make it pass, and call finish_task. Use unittest or pytest.</div><span class="task-status status-success">SUCCESS</span></div><div class="task-details">I successfully completed the TDD task:
+1. Created test_fib.py with 5 failing tests for the fibonacci function
+2. Ran the tests and verified they failed (ModuleNotFoundError for missing fib.py)
+3. Created fib.py with an iterative implementation of the fibonacci function
+4. Ran the tests again and verified all 5 tests pass
+
+The fibonacci function correctly computes:
+- fib(0) = 0
+- fib(1) = 1
+- fib(2) = 1
+- fib(3) = 2
+- fib(5) = 5</div><div class="task-meta">Executed at: 2026-05-19 08:19:06</div></div><div class="task-card success"><div class="task-header"><div class="task-title">Create a beautifully designed and responsive Snake game inside the workspace using HTML, CSS, and Javascript. Follow a TDD approach: 1. Write a Python test script named test_game.py that tests for the existence of index.html, style.css, and script.js, and validates that index.html contains a canvas element with id 'game-board' and script.js is loaded. 2. Run the test script and verify that it fails. 3. Implement the game files (index.html, style.css, script.js) with smooth snake animations, collision detection, and score tracking. 4. Run the test script again to verify it passes. 5. Call finish_task.</div><span class="task-status status-success">SUCCESS</span></div><div class="task-details">Successfully implemented a complete Snake Game with the following components:
+
+1. **style.css** - Dark theme styling with neon colors for the game board, snake, and food
+2. **script.js** - SnakeGame class with:
+   - Canvas-based rendering
+   - Snake movement with arrow keys
+   - Food spawning (avoiding snake body)
+   - Collision detection (walls and self)
+   - Score tracking
+   - Game over state with restart functionality
+3. **index.html** - Game structure with canvas, score display, and controls
+4. **test_game.py** - Unit tests for the SnakeGame class (5 tests passed)
+
+The game is fully functional and all tests pass successfully.</div><div class="task-meta">Executed at: 2026-05-19 08:24:04</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Test workspace isolation by printing hello</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 1 steps. Errors: 0</div><div class="task-meta">Executed at: 2026-05-19 08:25:06</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Test simplified folder structure</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 1 steps. Errors: 0</div><div class="task-meta">Executed at: 2026-05-19 08:26:00</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Create a beautifully designed and responsive Snake game inside the workspace using HTML, CSS, and Javascript. Follow a TDD approach: 1. Write a Python test script named test_game.py that tests for the existence of index.html, style.css, and script.js, and validates that index.html contains a canvas element with id 'game-board' and script.js is loaded. 2. Run the test script and verify that it fails. 3. Implement the game files (index.html, style.css, script.js) with smooth snake animations, collision detection, and score tracking. 4. Run the test script again to verify it passes. 5. Call finish_task.</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 20 steps. Errors: 19</div><div class="task-meta">Executed at: 2026-05-19 08:26:52</div></div><div class="task-card success"><div class="task-header"><div class="task-title">Create a beautifully designed and responsive Snake game inside the workspace using HTML, CSS, and Javascript. Follow a TDD approach: 1. Write a Python test script named test_game.py that tests for the existence of index.html, style.css, and script.js, and validates that index.html contains a canvas element with id 'game-board' and script.js is loaded. 2. Run the test script and verify that it fails. 3. Implement the game files (index.html, style.css, script.js) with smooth snake animations, collision detection, and score tracking. 4. Run the test script again to verify it passes. 5. Call finish_task.</div><span class="task-status status-success">SUCCESS</span></div><div class="task-details">Successfully implemented the Snake Game with all required components:
+
+1. Created index.html with canvas element (id='game-board') and score display
+2. Created style.css with game styling
+3. Created script.js with complete snake game logic including:
+   - Snake movement with arrow keys
+   - Food generation avoiding snake body
+   - Collision detection (walls and self)
+   - Score tracking
+   - Game over modal with restart functionality
+4. All tests passed successfully
+
+The snake game is fully functional and ready for use.</div><div class="task-meta">Executed at: 2026-05-19 08:28:56</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Test memory compaction</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 1 steps. Errors: 0</div><div class="task-meta">Executed at: 2026-05-19 08:34:00</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Test compaction flow</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Terminated after 1 steps. Errors: 0</div><div class="task-meta">Executed at: 2026-05-19 08:49:37</div></div><div class="task-card success"><div class="task-header"><div class="task-title">create game snake, with effects</div><span class="task-status status-success">SUCCESS</span></div><div class="task-details">I have successfully created a Snake game with visual effects. The game includes:
+
+**Visual Effects:**
+- Glowing snake head with neon green color
+- Pulsing glow effects on the game canvas
+- Particle explosions when eating food (orange particles)
+- Particle trail effects when the game ends (green particles)
+- Animated flash effect on game over
+- Smooth particle animations with fade-out
+
+**Game Features:**
+- Classic Snake gameplay with arrow keys or WASD controls
+- Score tracking with persistent high score (saved to localStorage)
+- Responsive canvas-based rendering
+- Neon/cyberpunk aesthetic with gradient background
+- Glowing borders and shadows for visual appeal
+
+**Technical Implementation:**
+- Canvas API for smooth rendering
+- Particle system for visual effects
+- Game loop with proper state management
+- Collision detection for walls and self
+- Food generation that avoids snake body
+
+The game is ready to play in the browser with the snake_game.html file.</div><div class="task-meta">Executed at: 2026-05-19 11:44:41</div></div><div class="task-card success"><div class="task-header"><div class="task-title">create snake game</div><span class="task-status status-success">SUCCESS</span></div><div class="task-details">I have explored the workspace and found it contains only task_info.html and task_state.json files. The workspace is minimal with no existing game files.
+
+## Step-by-Step Plan for Snake Game:
+
+### Phase 1: Setup and Basic Structure
+1. Create a test file (snake_test.js) with failing tests for:
+   - Snake movement logic
+   - Food generation
+   - Collision detection
+   - Score tracking
+   - Game over conditions
+
+2. Create the main game file (snake_game.js) with:
+   - Canvas setup
+   - Snake class with movement and growth
+   - Food generation
+   - Game loop
+   - Keyboard event handling
+
+3. Create an HTML file (index.html) to display the game
+
+### Phase 2: Implementation
+4. Implement the Snake class with:
+   - Position tracking (x, y coordinates)
+   - Direction handling
+   - Growth when eating food
+   - Collision detection with walls and self
+
+5. Implement the game loop with:
+   - Clear canvas
+   - Draw snake
+   - Draw food
+   - Update positions
+   - Check collisions
+
+6. Add keyboard controls (arrow keys/WASD)
+
+### Phase 3: Testing and Refinement
+7. Run tests to verify all functionality
+8. Refactor code as needed
+
+Let me start by creating the test file first (TDD approach).</div><div class="task-meta">Executed at: 2026-05-19 12:11:35</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Create a Python file named 'string_utils.py' containing a function 'reverse_string(s: str) -&gt; str' that returns the input string reversed. Do not include other functions.</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Step execution failed at step 1</div><div class="task-meta">Executed at: 2026-05-19 20:01:26</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">Create a Python file named 'string_utils.py' containing a function 'reverse_string(s: str) -&gt; str' that returns the input string reversed. Do not include other functions.</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Step execution failed at step 4</div><div class="task-meta">Executed at: 2026-05-19 20:22:11</div></div><div class="task-card failed"><div class="task-header"><div class="task-title">create snake game</div><span class="task-status status-failed">FAILED</span></div><div class="task-details">Step execution failed at step 9</div><div class="task-meta">Executed at: 2026-05-20 08:00:28</div></div></div>
+</body>
+</html>
