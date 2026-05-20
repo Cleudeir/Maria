@@ -183,7 +183,9 @@ async function getTaskDetails(taskId) {
       const timestampLabel = document.getElementById("supervision-timestamp");
       const extraLabel = document.getElementById("supervision-extra");
 
-      const statusText = task.supervision_status.replace(/_/g, " ").toUpperCase();
+      const statusText = task.supervision_status
+        .replace(/_/g, " ")
+        .toUpperCase();
       statusLabel.innerText = statusText;
       statusLabel.className = `supervision-pill status-${task.supervision_status}`;
 
@@ -195,7 +197,8 @@ async function getTaskDetails(taskId) {
         bannerTitle.innerText = "Supervisor Approved the Action";
       }
 
-      reasonLabel.innerText = task.supervision_reason || "No supervisor reasoning available.";
+      reasonLabel.innerText =
+        task.supervision_reason || "No supervisor reasoning available.";
       timestampLabel.innerText = task.supervision_last_review
         ? `Reviewed: ${new Date(task.supervision_last_review).toLocaleString()}`
         : "";
@@ -339,7 +342,8 @@ function stripHtmlTags(text) {
 
 function getLogEntryKey(entry) {
   const rawContent = entry.content || "";
-  const stepVal = (entry.step !== undefined && entry.step !== null) ? entry.step : "";
+  const stepVal =
+    entry.step !== undefined && entry.step !== null ? entry.step : "";
   return `${entry.role || ""}|${stepVal}|${rawContent.slice(0, 200)}`;
 }
 
@@ -423,7 +427,7 @@ function renderExecutionLogs(log) {
 
     card.innerHTML = `
             <div class="log-card-header">
-                <span>${icon} ${titleRole} (Step ${(entry.step !== undefined && entry.step !== null) ? entry.step : "-"})</span>
+                <span>${icon} ${titleRole} (Step ${entry.step !== undefined && entry.step !== null ? entry.step : "-"})</span>
                 ${usageBadge}
             </div>
             <div class="log-card-body">
@@ -583,7 +587,9 @@ async function openFileEditor(filePath) {
   });
 
   // Reset tab behavior and preview iframe
-  const isHtml = filePath.toLowerCase().endsWith(".html") || filePath.toLowerCase().endsWith(".htm");
+  const isHtml =
+    filePath.toLowerCase().endsWith(".html") ||
+    filePath.toLowerCase().endsWith(".htm");
   const tabsContainer = document.getElementById("editor-tabs");
   if (isHtml) {
     tabsContainer.style.display = "flex";
@@ -592,7 +598,7 @@ async function openFileEditor(filePath) {
   }
 
   // Default to code tab
-  switchEditorTab('code');
+  switchEditorTab("code");
 
   try {
     const res = await fetch(
@@ -608,12 +614,12 @@ async function openFileEditor(filePath) {
 // Close File Editor panel
 function closeEditor() {
   editingFilePath = null;
-  
+
   // Reset maximized state
   const editorPane = document.getElementById("editor-pane");
   editorPane.style.display = "none";
   editorPane.classList.remove("maximized");
-  
+
   // Reset toggle size button icon
   const toggleBtn = document.getElementById("btn-toggle-size");
   if (toggleBtn) {
@@ -621,7 +627,7 @@ function closeEditor() {
   }
 
   document.getElementById("editor-textarea").value = "";
-  
+
   const iframe = document.getElementById("editor-preview");
   if (iframe) {
     iframe.src = "about:blank";
@@ -686,9 +692,11 @@ function fullscreenPreview() {
 
   if (iframe.requestFullscreen) {
     iframe.requestFullscreen();
-  } else if (iframe.webkitRequestFullscreen) { /* Safari */
+  } else if (iframe.webkitRequestFullscreen) {
+    /* Safari */
     iframe.webkitRequestFullscreen();
-  } else if (iframe.msRequestFullscreen) { /* IE11 */
+  } else if (iframe.msRequestFullscreen) {
+    /* IE11 */
     iframe.msRequestFullscreen();
   }
 }
@@ -696,7 +704,10 @@ function fullscreenPreview() {
 // Open HTML file in standalone new browser tab
 function openPreviewInNewTab() {
   if (currentTaskId && editingFilePath) {
-    window.open(`/api/tasks/${currentTaskId}/files/raw/${editingFilePath}`, '_blank');
+    window.open(
+      `/api/tasks/${currentTaskId}/files/raw/${editingFilePath}`,
+      "_blank",
+    );
   }
 }
 
@@ -833,7 +844,11 @@ async function submitNewTask() {
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task: taskText, mode: mode, model_think: modelThink }),
+      body: JSON.stringify({
+        task: taskText,
+        mode: mode,
+        model_think: modelThink,
+      }),
     });
     const task = await res.json();
 
