@@ -340,6 +340,21 @@ def run_agent_step_sync(
         workspace_path, MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL)
     )
 
+    def _start_streaming():
+        state["current_streaming_response"] = ""
+        state["is_streaming"] = True
+        save_task_state(task_id, state)
+
+        def _callback(latest_text):
+            state["current_streaming_response"] = latest_text
+            save_task_state(task_id, state)
+
+        return _callback
+
+    def _stop_streaming():
+        state["is_streaming"] = False
+        save_task_state(task_id, state)
+
     # Load memories
     try:
         base_prompt = load_system_prompt(MEMORY_DIR)
@@ -374,7 +389,13 @@ def run_agent_step_sync(
     # State Machine
     if state["stage"] == "improving_prompt":
         try:
-            improved = agent.improve_prompt(state["task"], lessons)
+            callback = _start_streaming()
+            try:
+                improved = agent.improve_prompt(
+                    state["task"], lessons, stream_callback=callback
+                )
+            finally:
+                _stop_streaming()
             state["improved_prompt"] = improved
             state["execution_log"].append(
                 {
@@ -401,7 +422,13 @@ def run_agent_step_sync(
 
     elif state["stage"] == "generating_plan":
         try:
-            plan = agent.generate_plan(state["improved_prompt"])
+            callback = _start_streaming()
+            try:
+                plan = agent.generate_plan(
+                    state["improved_prompt"], stream_callback=callback
+                )
+            finally:
+                _stop_streaming()
             state["plan"] = plan
             state["execution_log"].append(
                 {
@@ -438,7 +465,11 @@ def run_agent_step_sync(
 
     elif state["stage"] == "creating_steps":
         try:
-            steps = agent.create_steps(state["plan"])
+            callback = _start_streaming()
+            try:
+                steps = agent.create_steps(state["plan"], stream_callback=callback)
+            finally:
+                _stop_streaming()
             state["steps"] = steps
             try:
                 save_execution_plan_steps(workspace_path, steps)
@@ -591,7 +622,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
 
     elif state["stage"] == "verifying":
         try:
-            verdict, report = agent.verify_execution(state["plan"], state["steps"])
+            callback = _start_streaming()
+            try:
+                verdict, report = agent.verify_execution(
+                    state["plan"], state["steps"], stream_callback=callback
+                )
+            finally:
+                _stop_streaming()
             state["execution_log"].append(
                 {
                     "step": state["step"],
@@ -693,8 +730,22 @@ def run_llm_for_tool(state, client):
 
     for attempt in range(max_retries):
         state["step"] += 1
+
+        # Prepare streaming state before the LLM call
+        state["current_streaming_response"] = ""
+        state["is_streaming"] = True
+        save_task_state(state["task_id"], state)
+
+        def _streaming_callback(latest_text):
+            state["current_streaming_response"] = latest_text
+            save_task_state(state["task_id"], state)
+
         try:
-            response_text = client.chat(state["messages"], temperature=0.1)
+            response_text = client.chat(
+                state["messages"],
+                temperature=0.1,
+                stream_callback=_streaming_callback,
+            )
         except Exception as e:
             err_msg = f"LLM error: {e}"
             state["errors_encountered"].append(
@@ -702,7 +753,12 @@ def run_llm_for_tool(state, client):
             )
             state["status"] = "failed"
             state["details"] = err_msg
+            state["is_streaming"] = False
+            save_task_state(state["task_id"], state)
             return state
+        finally:
+            state["is_streaming"] = False
+            save_task_state(state["task_id"], state)
 
         state["last_raw_response"] = response_text
         assistant_entry = {
@@ -1038,6 +1094,8 @@ def create_task():
         "steps": [],
         "current_step_idx": 0,
         "completed_step_summaries": [],
+        "current_streaming_response": "",
+        "is_streaming": False,
         "verification_report": None,
         "verification_verdict": None,
         "supervision_review_summary": None,
@@ -1069,6 +1127,8 @@ def get_task(task_id):
 
     # Include output-only file tree for workspace pane
     state["file_tree"] = build_output_file_tree(get_task_path(task_id))
+    state["current_streaming_response"] = state.get("current_streaming_response", "")
+    state["is_streaming"] = state.get("is_streaming", False)
     return jsonify(state)
 
 

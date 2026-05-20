@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Dict, Tuple, Any
+from typing import Callable, List, Dict, Tuple, Any, Optional
 from maria.llm import OllamaClient
 from maria.memory import load_system_prompt, load_lessons, add_task_history
 from maria.tools import ToolExecutor
@@ -72,7 +72,12 @@ class MariaAgent:
         self.execution_log = []
         self.errors_encountered = []
 
-    def improve_prompt(self, task: str, lessons: List[Dict[str, str]]) -> str:
+    def improve_prompt(
+        self,
+        task: str,
+        lessons: List[Dict[str, str]],
+        stream_callback: Optional[Callable[[str], None]] = None,
+    ) -> str:
         prompt = f"""You are an expert prompt engineer. Your job is to improve the user's prompt to be extremely clear, detailed, precise, and structured. 
 Ensure all requirements, edge cases, and testing strategies are explicit. Keep the original intent intact.
 
@@ -90,10 +95,15 @@ Provide only the improved task prompt. Do not add any preamble (like "Here is th
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
+            stream_callback=stream_callback,
         )
         return response.strip()
 
-    def generate_plan(self, improved_prompt: str) -> str:
+    def generate_plan(
+        self,
+        improved_prompt: str,
+        stream_callback: Optional[Callable[[str], None]] = None,
+    ) -> str:
         prompt = f"""You are a senior software architect. Based on the following detailed task description, generate a complete, comprehensive implementation plan.
 The plan must describe:
 1. Architecture & Design Choices
@@ -120,10 +130,15 @@ Provide the complete plan in clear Markdown. No conversational preamble.
                 {"role": "user", "content": prompt},
             ],
             temperature=0.2,
+            stream_callback=stream_callback,
         )
         return response.strip()
 
-    def create_steps(self, plan: str) -> List[str]:
+    def create_steps(
+        self,
+        plan: str,
+        stream_callback: Optional[Callable[[str], None]] = None,
+    ) -> List[str]:
         prompt = f"""You are a technical project manager. Read the implementation plan below and break it down into a list of specific, sequential, actionable steps.
 Each step must:
 - Be clear and focus on a single objective (e.g. "Create folder structure", "Implement factorial function in math_utils.py", "Create unit tests in test_math.py", "Run pytest and fix errors").
@@ -143,6 +158,7 @@ Provide ONLY the numbered list of steps (e.g. "1. Step description\n2. Step desc
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
+            stream_callback=stream_callback,
         )
 
         # Parse numbered list
@@ -160,7 +176,12 @@ Provide ONLY the numbered list of steps (e.g. "1. Step description\n2. Step desc
                 steps.append(line)
         return steps
 
-    def verify_execution(self, plan: str, steps: List[str]) -> Tuple[str, str]:
+    def verify_execution(
+        self,
+        plan: str,
+        steps: List[str],
+        stream_callback: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[str, str]:
         # Gather all files in workspace
         workspace_files_content = ""
         for root, dirs, files in os.walk(self.workspace_dir):
@@ -224,6 +245,7 @@ Output your response using these XML tags:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
+            stream_callback=stream_callback,
         )
 
         analysis_match = re.search(

@@ -3,7 +3,7 @@ import json
 import requests
 import threading
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 _lock = threading.Lock()
 _thread_local = threading.local()
@@ -72,7 +72,11 @@ def set_last_usage(usage: Dict[str, Any]):
     _thread_local.last_usage = usage
 
 
-def getGenerate(system_text: Optional[str], user_text: str) -> str:
+def getGenerate(
+    system_text: Optional[str],
+    user_text: str,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> str:
     """
     Sends a generation request to Ollama using streaming, and returns the complete generated response.
     """
@@ -130,11 +134,13 @@ def getGenerate(system_text: Optional[str], user_text: str) -> str:
                     event = json.loads(raw_line)
                     last_event = event
                     if isinstance(event.get("thinking"), str):
-                        print(f"[Ollama Queue think] {len(thinking_output) } chars")
+
                         thinking_output += event["thinking"]
                     if isinstance(event.get("response"), str):
-                        print(f"[Ollama Queue response] {len(response_output) } chars")
+
                         response_output += event["response"]
+                        if progress_callback:
+                            progress_callback(strip_thinking_process(response_output))
                     if event.get("done") is True:
                         break
                 except ValueError:

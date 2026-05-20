@@ -43,7 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       refreshDashboard();
     }
-  }, 3000);
+  }, 1200);
 });
 
 // Load Task List Sidebar
@@ -203,6 +203,9 @@ async function getTaskDetails(taskId) {
     } else {
       supervisorBanner.style.display = "none";
     }
+
+    // Render streaming generation preview
+    renderStreamingPanel(task);
 
     // Render Execution logs
     renderExecutionLogs(task.execution_log);
@@ -488,6 +491,26 @@ function renderLogContent(entry) {
 }
 
 // Render Workspace File Tree
+function renderStreamingPanel(task) {
+  const panel = document.getElementById("streaming-panel");
+  const contentEl = document.getElementById("streaming-content");
+  if (!panel || !contentEl) return;
+
+  const isStreaming = Boolean(task.is_streaming);
+  if (!isStreaming) {
+    panel.style.display = "none";
+    contentEl.innerHTML = "";
+    return;
+  }
+
+  panel.style.display = "flex";
+  let text = task.current_streaming_response || "Waiting for generation...";
+  if (task.current_streaming_response && task.current_streaming_response.length > 200) {
+    text = "..." + task.current_streaming_response.slice(-200);
+  }
+  contentEl.innerHTML = escapeHtml(text).replace(/\n/g, "<br>");
+}
+
 function renderFileTree(nodes) {
   const fileTreeJson = JSON.stringify(nodes);
   if (fileTreeJson === lastFileTreeJson) {

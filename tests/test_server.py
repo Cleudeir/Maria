@@ -201,6 +201,7 @@ def test_save_task_state_creates_missing_task_dir(monkeypatch, tmp_path):
         loaded = json.load(f)
     assert loaded["task_id"] == task_id
 
+
 def test_resume_incomplete_auto_task_is_marked_failed(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
     task_id = "task_auto_incomplete"
@@ -222,7 +223,9 @@ def test_resume_incomplete_auto_task_is_marked_failed(monkeypatch, tmp_path):
     assert "interrupted by application restart" in new_state["details"].lower()
 
 
-def test_resume_incomplete_step_task_is_reset_to_awaiting_intervention(monkeypatch, tmp_path):
+def test_resume_incomplete_step_task_is_reset_to_awaiting_intervention(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
     task_id = "task_step_incomplete"
     task_path = tmp_path / task_id
@@ -241,6 +244,7 @@ def test_resume_incomplete_step_task_is_reset_to_awaiting_intervention(monkeypat
     new_state = server.load_task_state(task_id)
     assert new_state["status"] == "awaiting_intervention"
     assert "interrupted by application restart" in new_state["details"].lower()
+
 
 def test_save_execution_plan_steps_creates_markdown_file(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
