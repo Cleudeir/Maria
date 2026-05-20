@@ -80,8 +80,8 @@ def prompt_user_approval(cmd: str) -> bool:
     """
     Prompts the user on the console to approve a critical command.
     """
-    if os.environ.get("MARIA_SERVER") == "1":
-        print(f"ℹ️ Server Mode: Auto-authorizing critical command: {cmd}")
+    if os.environ.get("MARIA_SERVER") == "1" or os.environ.get("MARIA_BENCHMARK") == "1":
+        print(f"ℹ️ Auto-authorizing critical command: {cmd}")
         return True
 
     print("\n" + "=" * 60)

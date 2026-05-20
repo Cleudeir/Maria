@@ -71,7 +71,7 @@ def test_compact_lessons_integration(tmpdir, monkeypatch):
       </lesson>
     </compacted_lessons>
     """)
-    monkeypatch.setattr("maria.agents.self_improvement.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.self_improvement.LLMClient.generate", mock_get_generate)
     
     # Run compaction
     success = agent.compact_lessons([

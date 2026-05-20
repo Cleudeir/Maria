@@ -144,22 +144,12 @@ def test_background_execution_loop_runs_supervisor_review_after_completion(
 def test_delete_task_stops_background_thread_and_cleans_up(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(server, "active_threads", {})
-    monkeypatch.setattr(server, "task_stop_events", {})
 
     task_id = "task_test"
     task_path = tmp_path / task_id
     task_path.mkdir()
     with open(task_path / "task_state.json", "w", encoding="utf-8") as f:
         json.dump({"task_id": task_id}, f)
-
-    terminated = {"called": False}
-
-    def fake_terminate(task_id_arg):
-        terminated["called"] = task_id_arg == task_id
-
-    monkeypatch.setattr(server, "terminate_task_process_groups", fake_terminate)
-
-    event = server.get_task_stop_event(task_id)
 
     class DummyThread:
         def __init__(self):
@@ -178,10 +168,7 @@ def test_delete_task_stops_background_thread_and_cleans_up(monkeypatch, tmp_path
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    assert terminated["called"] is True
-    assert event.is_set()
     assert task_id not in server.active_threads
-    assert task_id not in server.task_stop_events
     assert not os.path.exists(task_path)
 
 
@@ -267,6 +254,7 @@ def test_save_execution_plan_steps_creates_markdown_file(monkeypatch, tmp_path):
 
 def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
     state = {
+        "task_id": "task_dummy",
         "step": 1,
         "mode": "auto",
         "messages": [],
@@ -274,32 +262,46 @@ def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
         "execution_log": [],
     }
 
+    monkeypatch.setattr(server, "save_task_state", lambda *a: None)
+
     class DummyClient:
         def __init__(self):
             self.base_url = "http://localhost:11434"
             self.model = "qwen3.5:4b"
+            self.last_usage = None
+            self.call_count = 0
+            self.responses = []
+
+        def chat(self, messages, temperature=0.1, stream_callback=None):
+            self.call_count += 1
+            if stream_callback:
+                stream_callback("thinking...")
+            if self.responses:
+                return self.responses.pop(0)
+            return "No valid tool output"
 
     client = DummyClient()
 
-    mock_get_generate = MagicMock(return_value="No valid tool output")
-    monkeypatch.setattr(server, "getGenerate", mock_get_generate)
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "awaiting_intervention"
     assert new_state["proposed_tool"] is None
     assert any(err["type"] == "format_error" for err in new_state["errors_encountered"])
+    assert client.call_count == 10
 
-    mock_get_generate.return_value = "<think>Thinking through the next step.</think>"
+    client.call_count = 0
+    client.responses = ["<think>Thinking through the next step.</think>"] * 10
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "awaiting_intervention"
     assert new_state["proposed_tool"] is None
     assert any(err["type"] == "format_error" for err in new_state["errors_encountered"])
-    assert mock_get_generate.call_count == 22
+    assert client.call_count == 10
 
 
 def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
     state = {
+        "task_id": "task_dummy",
         "step": 1,
         "mode": "auto",
         "messages": [],
@@ -307,38 +309,37 @@ def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
         "execution_log": [],
     }
 
+    monkeypatch.setattr(server, "save_task_state", lambda *a: None)
+
     class DummyClient:
         def __init__(self):
             self.base_url = "http://localhost:11434"
             self.model = "qwen3.5:4b"
+            self.last_usage = {"prompt_tokens": 10}
+            self.call_count = 0
+            self.responses = [
+                "Invalid output first",
+                "<thought>Second attempt reasoning</thought><tool name=\"list_dir\"><path>.</path></tool>",
+            ]
+
+        def chat(self, messages, temperature=0.1, stream_callback=None):
+            self.call_count += 1
+            if stream_callback:
+                stream_callback("thinking...")
+            return self.responses.pop(0)
 
     client = DummyClient()
-
-    # First returns invalid, second returns valid list_dir tool call
-    responses = [
-        "Invalid output first",
-        '<think>Second attempt reasoning</think><tool name="list_dir"><path>.</path></tool>',
-    ]
-    call_idx = 0
-
-    def mock_get_generate(system, user):
-        nonlocal call_idx
-        res = responses[call_idx]
-        call_idx += 1
-        return res
-
-    monkeypatch.setattr(server, "getGenerate", mock_get_generate)
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "running"
     assert new_state["proposed_tool"] == {
         "name": "list_dir",
         "args": {"path": "."},
-        "thought": "<think>Second attempt reasoning</think>",
+        "thought": "Second attempt reasoning",
     }
     assert len(new_state["errors_encountered"]) == 1
     assert new_state["errors_encountered"][0]["type"] == "format_error"
-    assert call_idx == 2
+    assert client.call_count == 2
 
 
 def test_get_legacy_task_fallback(monkeypatch, tmp_path):

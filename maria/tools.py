@@ -5,6 +5,30 @@ import signal
 import time
 from maria.security import is_path_safe, is_command_critical, prompt_user_approval
 
+BINARY_EXTENSIONS = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+    ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+    ".exe", ".dll", ".so", ".dylib", ".bin",
+    ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flac",
+    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    ".pyc", ".pyo", ".pyd",
+    ".db", ".sqlite", ".sqlite3",
+})
+
+
+def is_binary_file(file_path: str, sample_size: int = 8192) -> bool:
+    _, ext = os.path.splitext(file_path)
+    if ext.lower() in BINARY_EXTENSIONS:
+        return True
+    try:
+        with open(file_path, "rb") as f:
+            chunk = f.read(sample_size)
+        return b"\0" in chunk
+    except Exception:
+        return False
+
+
 # Track process groups for tasks so they can be terminated when a task is deleted.
 task_process_groups = {}
 
@@ -59,6 +83,7 @@ class ToolExecutor:
         self.task_id = task_id
         # Ensure workspace directory exists
         os.makedirs(self.workspace_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.workspace_dir, "output"), exist_ok=True)
 
     def _resolve_output_path(self, path: str) -> tuple[str, str | None]:
         """
@@ -143,6 +168,9 @@ class ToolExecutor:
         filename = os.path.basename(target_file)
         if filename in ("task_state.json", "task_info.html"):
             return "Error: Access Denied. Internal system file."
+
+        if is_binary_file(target_file):
+            return f"Error: Cannot read '{path}': binary files are not supported."
 
         try:
             with open(target_file, "r", encoding="utf-8") as f:

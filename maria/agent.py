@@ -1,9 +1,9 @@
 import os
 import re
 from typing import Callable, List, Dict, Tuple, Any, Optional
-from maria.llm import OllamaClient
+from maria.llm import LLMClient
 from maria.memory import load_system_prompt, load_lessons, add_task_history
-from maria.tools import ToolExecutor
+from maria.tools import ToolExecutor, is_binary_file
 
 
 def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
@@ -63,11 +63,17 @@ class MariaAgent:
         workspace_dir: str,
         memory_dir: str,
         ollama_url: str = "http://localhost:11434",
+        provider_type: str = "ollama",
+        model_think: bool = True,
     ):
         self.workspace_dir = os.path.abspath(workspace_dir)
         os.makedirs(self.workspace_dir, exist_ok=True)
         self.memory_dir = os.path.abspath(memory_dir)
-        self.client = OllamaClient(base_url=ollama_url)
+        self.client = LLMClient(
+            base_url=ollama_url,
+            provider_type=provider_type,
+            model_think=model_think,
+        )
         self.executor = ToolExecutor(self.workspace_dir)
         self.execution_log = []
         self.errors_encountered = []
@@ -144,6 +150,9 @@ Each step must:
 - Be clear and focus on a single objective (e.g. "Create folder structure", "Implement factorial function in math_utils.py", "Create unit tests in test_math.py", "Run pytest and fix errors").
 - Be numbered sequentially (e.g., 1., 2., 3.).
 
+CRITICAL REQUIREMENT:
+The list of steps must be extremely concise and contain at most 3 to 5 high-level sequential milestones. Do not create micro-steps (like editing a single line, styling a button, or writing individual files). Group related activities together into broad phases (for example: Phase 1: Implement HTML/CSS structure and core JavaScript logic; Phase 2: Run verification and fix bugs; Phase 3: Finalize). Fewer steps are highly preferred to minimize transitions.
+
 Implementation Plan:
 ---
 {plan}
@@ -196,6 +205,11 @@ Provide ONLY the numbered list of steps (e.g. "1. Step description\n2. Step desc
                     continue
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, self.workspace_dir)
+                if is_binary_file(file_path):
+                    workspace_files_content += (
+                        f"\n--- FILE: {rel_path} (binary file, skipped) ---\n"
+                    )
+                    continue
                 try:
                     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                         content = f.read()

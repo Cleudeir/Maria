@@ -1,8 +1,14 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from maria.ollama import getGenerate
+from maria.provider.ollama import OllamaProvider
 from maria.agents.utils import parse_agent_response
+
+_default_supervision_provider = OllamaProvider()
+
+
+def _default_generate(system_text, user_text, progress_callback=None):
+    return _default_supervision_provider.generate(system_text, user_text, progress_callback)
 
 
 def build_supervision_prompt(
@@ -89,7 +95,7 @@ def supervise_proposed_tool(
     completed_summaries: List[str],
     last_tool_result: Optional[str] = None,
     last_user_intervention: Optional[str] = None,
-    get_generate_fn=getGenerate,
+    get_generate_fn=_default_generate,
 ) -> Dict[str, Any]:
     prompt = build_supervision_prompt(
         task=task,
@@ -173,7 +179,7 @@ def supervise_task_result(
     completed_summaries: List[str],
     verification_report: str,
     verdict: str,
-    get_generate_fn=getGenerate,
+    get_generate_fn=_default_generate,
 ) -> Dict[str, Any]:
     prompt = build_result_supervision_prompt(
         task=task,

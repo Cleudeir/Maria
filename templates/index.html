@@ -107,6 +107,9 @@
                 </div>
                 
                     <div class="task-header-actions">
+                    <button class="btn-action" id="btn-finish-task" onclick="openFinishTaskModal()">
+                        <i class="fa-solid fa-flag-checkered"></i> Finish Task
+                    </button>
                     <button class="btn-action danger" onclick="deleteActiveTask()">
                         <i class="fa-solid fa-trash-can"></i> Delete
                     </button>
@@ -245,6 +248,14 @@
             </div>
             
             <div class="form-group">
+                <label class="form-label">Provider</label>
+                <select class="form-select" id="new-task-provider">
+                    <option value="ollama">Ollama (Local)</option>
+                    <option value="opencode">OpenCode (Cloud)</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="ollama-settings">
                 <label class="form-label">Ollama Model Settings</label>
                 <div style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <input type="checkbox" id="new-task-model-think" checked style="width: 18px; height: 18px; accent-color: var(--color-primary); cursor: pointer; border-radius: 4px;">
@@ -295,6 +306,38 @@
             
             <div class="modal-footer">
                 <button class="btn-modal" onclick="closeModals()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Manually Finish Task -->
+    <div class="modal-overlay" id="modal-finish-task">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title">Manually Finish Task</div>
+                <i class="fa-solid fa-xmark modal-close" onclick="closeModals()"></i>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Task Status Outcome</label>
+                <div class="outcome-selector-group">
+                    <button type="button" class="btn-outcome active" id="btn-outcome-completed" onclick="setFinishOutcome('completed')">
+                        <i class="fa-solid fa-circle-check"></i> Completed (Success)
+                    </button>
+                    <button type="button" class="btn-outcome" id="btn-outcome-failed" onclick="setFinishOutcome('failed')">
+                        <i class="fa-solid fa-circle-xmark"></i> Failed (Failure)
+                    </button>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Completion Summary / Reason</label>
+                <textarea class="form-textarea" id="finish-task-reason" placeholder="Explain why you are finishing this task manually (e.g. game is complete and running, tests passed, agent got stuck but file is written...)"></textarea>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-modal" onclick="closeModals()">Cancel</button>
+                <button class="btn-modal btn-modal-submit" onclick="submitFinishTask()">Finish Task</button>
             </div>
         </div>
     </div>

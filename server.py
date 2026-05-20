@@ -3,8 +3,11 @@ import sys
 import json
 import time
 import shutil
+import signal
+import atexit
 import threading
 import mimetypes
+import logging
 from datetime import datetime
 from flask import (
     Flask,
@@ -19,7 +22,7 @@ from bs4 import BeautifulSoup
 # Add current directory to path to load maria package
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from maria.llm import OllamaClient
+from maria.llm import LLMClient as OllamaClient
 from maria.agent import parse_agent_response, MariaAgent
 from maria.agents.supervise_execution import supervise_task_result
 from maria.security import is_command_critical
@@ -42,6 +45,8 @@ app = Flask(
     static_folder="static",
     static_url_path="/static",
 )
+
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 
 @app.after_request
@@ -91,8 +96,11 @@ def load_task_state(task_id):
     if not os.path.exists(path):
         return None
     with get_task_lock(task_id):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return None
 
 
 def save_task_state(task_id, state):
@@ -100,8 +108,22 @@ def save_task_state(task_id, state):
     os.makedirs(task_path, exist_ok=True)
     path = os.path.join(task_path, "task_state.json")
     with get_task_lock(task_id):
-        with open(path, "w", encoding="utf-8") as f:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    current_disk_state = json.load(f)
+                if current_disk_state.get("status") in ("completed", "failed"):
+                    state["status"] = current_disk_state["status"]
+                    if "details" in current_disk_state:
+                        state["details"] = current_disk_state["details"]
+                    if "proposed_tool" in current_disk_state:
+                        state["proposed_tool"] = current_disk_state["proposed_tool"]
+            except Exception:
+                pass
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
 
 
 def format_task_prompt(prompt):
@@ -321,12 +343,27 @@ def run_agent_step_sync(
         if action != "inject":
             return state
         if state["status"] in ("completed", "failed"):
-            state["proposed_tool"] = None
+            state["proposed_tool"] = {
+                "name": "improve_prompt",
+                "args": {},
+                "thought": "Restarting task. Let's begin by improving the user prompt.",
+            }
+            state["stage"] = "improving_prompt"
+            state["step"] = 0
+            state["improved_prompt"] = None
+            state["plan"] = None
+            state["steps"] = []
+            state["current_step_idx"] = 0
+            state["completed_step_summaries"] = []
+            state["messages"] = []
+            state["last_tool_result"] = None
+            state["last_user_intervention"] = None
             if state.get("mode") == "auto":
                 state["status"] = "running"
             else:
                 state["status"] = "awaiting_intervention"
             save_task_state(task_id, state)
+            return state
 
     if action in ("inject", "approve", "modify"):
         state["status"] = "processando"
@@ -334,10 +371,17 @@ def run_agent_step_sync(
 
     workspace_path = get_task_path(task_id)
     executor = ToolExecutor(workspace_path)
-    client = OllamaClient(base_url=state.get("ollama_url", OLLAMA_URL))
+    client = OllamaClient(
+        base_url=state.get("ollama_url", OLLAMA_URL),
+        provider_type=state.get("provider_type", "ollama"),
+        model_think=state.get("model_think", True),
+    )
 
     agent = MariaAgent(
-        workspace_path, MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL)
+        workspace_path, MEMORY_DIR,
+        ollama_url=state.get("ollama_url", OLLAMA_URL),
+        provider_type=state.get("provider_type", "ollama"),
+        model_think=state.get("model_think", True),
     )
 
     def _start_streaming():
@@ -418,7 +462,9 @@ def run_agent_step_sync(
                 state["status"] = "running"
         except Exception as e:
             state["status"] = "failed"
+            state["proposed_tool"] = None
             state["details"] = f"Failed to improve prompt: {e}"
+            print(f"[Stage] improving_prompt failed for {task_id}: {e}", flush=True)
 
     elif state["stage"] == "generating_plan":
         try:
@@ -461,7 +507,9 @@ def run_agent_step_sync(
                 state["status"] = "running"
         except Exception as e:
             state["status"] = "failed"
+            state["proposed_tool"] = None
             state["details"] = f"Failed to generate plan: {e}"
+            print(f"[Stage] generating_plan failed for {task_id}: {e}", flush=True)
 
     elif state["stage"] == "creating_steps":
         try:
@@ -503,7 +551,9 @@ def run_agent_step_sync(
                 state["status"] = "running"
         except Exception as e:
             state["status"] = "failed"
+            state["proposed_tool"] = None
             state["details"] = f"Failed to create steps: {e}"
+            print(f"[Stage] creating_steps failed for {task_id}: {e}", flush=True)
 
     elif state["stage"] == "executing_steps":
         steps = state["steps"]
@@ -537,6 +587,8 @@ Step Description: {steps[curr_idx]}
 
 Your objective is to complete ONLY this step using your tools.
 When you believe this step is fully complete, call the 'finish_task' tool with a summary of what you did.
+
+CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do not ask "What would you like to do next?". You must execute the entire step autonomously. Once the code is written, immediately call the 'finish_task' tool to proceed to the next step.
 """,
                 },
             ]
@@ -1031,6 +1083,7 @@ def create_task():
     max_steps = int(data.get("max_steps", 20))
     mode = data.get("mode", "step")  # 'step' or 'auto'
     model_think = bool(data.get("model_think", True))
+    provider_type = data.get("provider_type", "ollama")
 
     # 1. Create isolated directory and output directory
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1065,11 +1118,12 @@ def create_task():
         "task": task_prompt,
         "created_at": created_time_str,
         "mode": mode,
-        "status": "running" if mode == "auto" else "awaiting_intervention",
+        "status": "running",  # always start running; step mode will pause after first stage
         "stage": "improving_prompt",
         "step": 0,
         "max_steps": max_steps,
         "model_think": model_think,
+        "provider_type": provider_type,
         "ollama_url": OLLAMA_URL,
         "messages": [],
         "execution_log": [
@@ -1108,13 +1162,30 @@ def create_task():
     save_task_state(task_id, state)
     save_plan_overview(task_path, task_prompt, created_time_str)
 
-    # 5. Handle initial execution based on mode
-    if mode == "auto":
-        # Launch background thread
-        thread = threading.Thread(target=background_execution_loop, args=(task_id,))
-        thread.daemon = True
-        thread.start()
-        active_threads[task_id] = thread
+    # 5. Always auto-start first step in background (both auto and step modes).
+    # Step mode will pause at awaiting_intervention after the first stage completes.
+    def _initial_step():
+        try:
+            run_agent_step_sync(task_id, action="approve")
+            # For auto mode, continue the full loop after the first step
+            if mode == "auto":
+                background_execution_loop(task_id)
+        except Exception as e:
+            print(f"[Startup] _initial_step crashed for {task_id}: {e}", flush=True)
+            try:
+                s = load_task_state(task_id)
+                if s and s.get("status") not in ("completed", "failed"):
+                    s["status"] = "failed"
+                    s["proposed_tool"] = None
+                    s["details"] = f"Internal startup error: {e}"
+                    save_task_state(task_id, s)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_initial_step)
+    thread.daemon = True
+    thread.start()
+    active_threads[task_id] = thread
 
     return jsonify(state)
 
@@ -1123,7 +1194,50 @@ def create_task():
 def get_task(task_id):
     state = load_task_state(task_id)
     if not state:
-        return jsonify({"error": "Task not found"}), 404
+        # Gracefully handle legacy tasks
+        task_path = get_task_path(task_id)
+        info_path = os.path.join(task_path, "task_info.html")
+        if os.path.exists(info_path):
+            task_desc = "Unknown Task"
+            with open(info_path, "r", encoding="utf-8") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+                desc_div = soup.find(class_="task-description")
+                if desc_div:
+                    task_desc = desc_div.text.strip()
+            created_time = task_id.replace("task_", "")
+            state = {
+                "task_id": task_id,
+                "task": task_desc,
+                "created_at": created_time,
+                "status": "legacy",
+                "stage": "legacy",
+                "step": 0,
+                "max_steps": 20,
+                "messages": [],
+                "execution_log": [],
+                "errors_encountered": [],
+                "proposed_tool": None,
+                "last_raw_response": None,
+                "step_summaries": [],
+                "last_tool_result": None,
+                "last_user_intervention": None,
+                "improved_prompt": None,
+                "plan": None,
+                "steps": [],
+                "current_step_idx": 0,
+                "completed_step_summaries": [],
+                "current_streaming_response": "",
+                "is_streaming": False,
+                "verification_report": None,
+                "verification_verdict": None,
+                "supervision_review_summary": None,
+                "supervision_status": "idle",
+                "supervision_reason": None,
+                "supervision_last_review": None,
+                "supervision_log": [],
+            }
+        else:
+            return jsonify({"error": "Task not found"}), 404
 
     # Include output-only file tree for workspace pane
     state["file_tree"] = build_output_file_tree(get_task_path(task_id))
@@ -1145,6 +1259,38 @@ def post_task_action(task_id):
     modified_tool = data.get("modified_tool")
     user_prompt = data.get("user_prompt")
 
+    if action == "force_complete":
+        status = data.get("status", "completed")
+        reason = data.get("reason", "Manually finished by user.")
+        
+        state["status"] = status
+        state["details"] = reason
+        state["proposed_tool"] = None
+        
+        state["execution_log"].append({
+            "step": state.get("step", 0) + 1,
+            "role": "system",
+            "content": f"🏁 Task manually marked as {status.upper()}: {reason}"
+        })
+        
+        try:
+            outcome = "SUCCESS" if status == "completed" else "FAILED"
+            add_task_history(MEMORY_DIR, state["task"], outcome, reason[:200])
+        except Exception:
+            pass
+            
+        try:
+            trigger_self_improvement(task_id, state)
+        except Exception:
+            pass
+            
+        save_task_state(task_id, state)
+        
+        if task_id in active_threads:
+            del active_threads[task_id]
+            
+        return jsonify(state)
+
     if action == "resume_auto":
         if state.get("mode") != "auto":
             return jsonify({"error": "Task is not in auto mode"}), 400
@@ -1161,22 +1307,32 @@ def post_task_action(task_id):
 
         return jsonify(state)
 
-    # Temporary run agent step
-    state = run_agent_step_sync(
-        task_id, action=action, modified_tool=modified_tool, user_prompt=user_prompt
-    )
+    # Guard: don't start a new thread if one is already running for this task
+    existing_thread = active_threads.get(task_id)
+    if existing_thread and existing_thread.is_alive():
+        return jsonify(load_task_state(task_id) or state)
 
-    if (
-        action == "inject"
-        and state.get("mode") == "auto"
-        and state.get("status") == "running"
-    ):
-        thread = active_threads.get(task_id)
-        if not thread or not thread.is_alive():
-            thread = threading.Thread(target=background_execution_loop, args=(task_id,))
-            thread.daemon = True
-            thread.start()
-            active_threads[task_id] = thread
+    # Mark as processing immediately so the UI knows work is underway
+    state["status"] = "processando"
+    save_task_state(task_id, state)
+
+    def _run_step_in_background():
+        result = run_agent_step_sync(
+            task_id, action=action, modified_tool=modified_tool, user_prompt=user_prompt
+        )
+        # If auto mode and still running after inject, keep the loop going
+        if (
+            action == "inject"
+            and result
+            and result.get("mode") == "auto"
+            and result.get("status") == "running"
+        ):
+            background_execution_loop(task_id)
+
+    thread = threading.Thread(target=_run_step_in_background)
+    thread.daemon = True
+    thread.start()
+    active_threads[task_id] = thread
 
     return jsonify(state)
 
@@ -1339,10 +1495,12 @@ def manage_lessons():
 def mark_incomplete_task_after_restart(task_id, state):
     """Mark a task incomplete when the application restarts during Ollama streaming."""
     mode = state.get("mode", "step")
-    status = state.get("status")
+
+    state["is_streaming"] = False
 
     if mode == "auto":
         state["status"] = "failed"
+        state["proposed_tool"] = None
         state["details"] = (
             "Task was interrupted by application restart while Ollama streaming was active. "
             "The task is incomplete and must be restarted manually."
@@ -1372,30 +1530,74 @@ def resume_incomplete_tasks():
     If task mode is step, the task is reset to awaiting_intervention for manual recovery.
     """
     print("[Startup] Scanning for incomplete tasks to resume...", flush=True)
+    if not os.path.exists(WORKSPACE_DIR):
+        return
+    for folder in os.listdir(WORKSPACE_DIR):
+        if not folder.startswith("task_") or not os.path.isdir(
+            os.path.join(WORKSPACE_DIR, folder)
+        ):
+            continue
+        try:
+            state = load_task_state(folder)
+            if not state:
+                continue
+
+            status = state.get("status")
+            mode = state.get("mode", "step")
+            task_id = state.get("task_id")
+
+            if status in ("running", "processando"):
+                print(
+                    f"[Startup] Found incomplete task: {task_id} (status: {status}, mode: {mode})",
+                    flush=True,
+                )
+                mark_incomplete_task_after_restart(task_id, state)
+        except Exception as e:
+            print(
+                f"[Startup] Error processing task folder {folder}: {e}",
+                flush=True,
+            )
+
+
+def shutdown_handler(signum=None, frame=None):
+    """Gracefully mark all active tasks as interrupted on shutdown."""
+    print("\n[Shutdown] Shutting down gracefully...", flush=True)
     try:
-        if not os.path.exists(WORKSPACE_DIR):
-            return
         for folder in os.listdir(WORKSPACE_DIR):
-            if folder.startswith("task_") and os.path.isdir(
+            if not folder.startswith("task_") or not os.path.isdir(
                 os.path.join(WORKSPACE_DIR, folder)
             ):
+                continue
+            try:
                 state = load_task_state(folder)
                 if not state:
                     continue
-
                 status = state.get("status")
-                mode = state.get("mode", "step")
-                task_id = state.get("task_id")
-
                 if status in ("running", "processando"):
+                    task_id = state.get("task_id", folder)
                     print(
-                        f"[Startup] Found incomplete task: {task_id} (status: {status}, mode: {mode})",
+                        f"[Shutdown] Marking task {task_id} as interrupted (status: {status})",
                         flush=True,
                     )
-                    mark_incomplete_task_after_restart(task_id, state)
+                    state["is_streaming"] = False
+                    state["status"] = "failed"
+                    state["details"] = (
+                        "Task was interrupted by server shutdown. "
+                        "Please review and restart the task manually."
+                    )
+                    save_task_state(task_id, state)
+            except Exception as e:
+                print(
+                    f"[Shutdown] Error marking task in folder {folder}: {e}",
+                    flush=True,
+                )
     except Exception as e:
-        print(f"[Startup] Error resuming incomplete tasks: {e}", flush=True)
+        print(f"[Shutdown] Error during shutdown cleanup: {e}", flush=True)
 
+
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
+atexit.register(shutdown_handler)
 
 if __name__ == "__main__":
     # Disable debug/reloader when running in production or under PM2.

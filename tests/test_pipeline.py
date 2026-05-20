@@ -1,6 +1,7 @@
 import os
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
 from maria.agents import MariaAgent
+from maria.agents.improve_prompt import improve_prompt as improve_prompt_fn
 
 def test_improve_prompt(tmpdir, monkeypatch):
     workspace = str(tmpdir.mkdir("workspace"))
@@ -8,7 +9,7 @@ def test_improve_prompt(tmpdir, monkeypatch):
     
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="Improved task instruction.")
-    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_get_generate)
     
     improved = agent.improve_prompt("Test task", [])
     assert improved == "Improved task instruction."
@@ -20,7 +21,7 @@ def test_generate_plan(tmpdir, monkeypatch):
     
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="# My Plan\nStep 1...")
-    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_get_generate)
     
     plan = agent.generate_plan("Improved task")
     assert plan == "# My Plan\nStep 1..."
@@ -31,7 +32,7 @@ def test_create_steps(tmpdir, monkeypatch):
     
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="1. Create file\n2. Run tests")
-    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_get_generate)
     
     steps = agent.create_steps("Plan text")
     assert len(steps) == 2
@@ -48,7 +49,7 @@ def test_verify_execution(tmpdir, monkeypatch):
         
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="<analysis>Audited successfully</analysis>\n<verdict>SUCCESS</verdict>")
-    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_get_generate)
     
     verdict, analysis = agent.verify_execution("Plan text", ["Create file"])
     assert verdict == "SUCCESS"
@@ -79,7 +80,7 @@ def test_agent_run_pipeline_success(tmpdir, monkeypatch):
         '<thought>Done step 2</thought><tool name="finish_task"><summary>Summary 2</summary></tool>'
     ]
     mock_get_generate = MagicMock(side_effect=responses)
-    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_get_generate)
     
     # Mock verification
     agent.verify_execution = MagicMock(return_value=("SUCCESS", "All clean"))
@@ -91,3 +92,62 @@ def test_agent_run_pipeline_success(tmpdir, monkeypatch):
     assert agent.create_steps.called
     assert agent.verify_execution.called
     assert mock_get_generate.call_count == 2
+
+
+def test_maria_agent_with_opencode_provider(tmpdir, monkeypatch):
+    """Test that MariaAgent works with opencode provider and stream_callback"""
+    workspace = str(tmpdir.mkdir("workspace"))
+    memory = str(tmpdir.mkdir("memory"))
+
+    agent = MariaAgent(workspace, memory, provider_type="opencode")
+    assert agent.client.provider.name == "opencode"
+
+    mock_generate = MagicMock(return_value="Improved task with opencode.")
+    monkeypatch.setattr(agent.client.provider.__class__, "generate", mock_generate)
+
+    callback_called = []
+    def stream_cb(text):
+        callback_called.append(text)
+
+    improved = agent.improve_prompt("Test task", [], stream_callback=stream_cb)
+    assert improved == "Improved task with opencode."
+    mock_generate.assert_called_once()
+    _, kwargs = mock_generate.call_args
+    assert "system_text" in kwargs
+    assert "user_text" in kwargs
+    assert kwargs["progress_callback"] is stream_cb
+
+
+def test_improve_prompt_passes_stream_callback(tmpdir, monkeypatch):
+    """Test that improve_prompt module passes stream_callback as progress_callback"""
+    workspace = str(tmpdir.mkdir("workspace"))
+    memory = str(tmpdir.mkdir("memory"))
+
+    callback_holder = {}
+    def dummy_generate(system_text=None, user_text="", progress_callback=None):
+        callback_holder["cb"] = progress_callback
+        return "result"
+
+    def stream_cb(text):
+        pass
+
+    result = improve_prompt_fn("Test task", [], get_generate_fn=dummy_generate, stream_callback=stream_cb)
+    assert result == "result"
+    assert callback_holder["cb"] is stream_cb
+
+
+def test_improve_prompt_no_stream_callback_does_not_crash(tmpdir, monkeypatch):
+    """Test that improve_prompt works even without stream_callback (None default)"""
+    workspace = str(tmpdir.mkdir("workspace"))
+    memory = str(tmpdir.mkdir("memory"))
+
+    agent = MariaAgent(workspace, memory)
+
+    mock_generate = MagicMock(return_value="Improved task.")
+    monkeypatch.setattr(agent.client.provider.__class__, "generate", mock_generate)
+
+    improved = agent.improve_prompt("Test task", [])
+    assert improved == "Improved task."
+    mock_generate.assert_called_once()
+    _, kwargs = mock_generate.call_args
+    assert kwargs.get("progress_callback") is None

@@ -1,8 +1,17 @@
 import os
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Callable
 
-def verify_execution(workspace_dir: str, plan: str, steps: List[str], get_generate_fn) -> Tuple[str, str]:
+from maria.tools import is_binary_file
+
+
+def verify_execution(
+    workspace_dir: str,
+    plan: str,
+    steps: List[str],
+    get_generate_fn,
+    stream_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[str, str]:
     # Gather all files in workspace
     workspace_files_content = ""
     for root, dirs, files in os.walk(workspace_dir):
@@ -17,6 +26,11 @@ def verify_execution(workspace_dir: str, plan: str, steps: List[str], get_genera
                 continue
             file_path = os.path.join(root, file)
             rel_path = os.path.relpath(file_path, workspace_dir)
+            if is_binary_file(file_path):
+                workspace_files_content += (
+                    f"\n--- FILE: {rel_path} (binary file, skipped) ---\n"
+                )
+                continue
             try:
                 with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
@@ -60,6 +74,7 @@ Output your response using these XML tags:
     response = get_generate_fn(
         system_text="You are a code verification quality control assistant.",
         user_text=prompt,
+        progress_callback=stream_callback,
     )
 
     analysis_match = re.search(

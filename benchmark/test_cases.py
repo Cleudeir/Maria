@@ -587,3 +587,15 @@ def verify_task_30(workspace_path: str):
     repo1 = container.resolve("repo")
     repo2 = container.resolve("repo")
     assert repo1 is not repo2 or repo1 is not repo2, "Transient instances should be distinct" # Transient should create new instances
+
+def verify_task_31(workspace_path: str):
+    # Snake Game HTML
+    html_path = os.path.join(workspace_path, "index.html")
+    assert os.path.exists(html_path), "index.html file does not exist"
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    assert "game-canvas" in content or "canvas" in content.lower(), "Should contain canvas element"
+    assert "snake" in content.lower(), "Should mention snake in HTML/JS"
+    assert "score" in content.lower(), "Should implement scoring mechanism"
+    assert "keydown" in content.lower() or "arrow" in content.lower() or "wasd" in content.lower(), "Should handle keyboard inputs"

@@ -208,5 +208,12 @@
     "name": "Dependency Injection Container",
     "prompt": "Create a Python file named 'di_container.py' implementing a class 'Container'. It must support registering dependencies: 'register_singleton(name: str, cls: type, dependencies: list = []) -> None', 'register_transient(name: str, cls: type, dependencies: list = []) -> None', and resolving them: 'resolve(name: str) -> object'. The 'dependencies' argument lists the names of other registered classes that must be injected into the class constructor. For singleton, return the same instance; for transient, return a new instance.",
     "target_file": "di_container.py"
+  },
+  {
+    "id": 31,
+    "difficulty": "medium",
+    "name": "Snake Game HTML",
+    "prompt": "Create a fully functional interactive classic Snake game in a single self-contained HTML file named 'index.html'. The file must contain a <canvas> element with id 'game-canvas', a styled start button, scores, stylesheet rules, and complete JavaScript code containing game initialization, board grid, snake movement (using WASD or Arrow keys), collision detection, score updates, and a game-over screen. Do not use external files or libraries.",
+    "target_file": "index.html"
   }
 ]

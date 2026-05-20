@@ -35,6 +35,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Toggle Ollama settings visibility based on provider
+  const providerSelect = document.getElementById("new-task-provider");
+  if (providerSelect) {
+    providerSelect.addEventListener("change", () => {
+      const ollamaSettings = document.getElementById("ollama-settings");
+      if (ollamaSettings) {
+        ollamaSettings.style.display = providerSelect.value === "ollama" ? "block" : "none";
+      }
+    });
+  }
+
   // Periodically refresh list & active task log
   setInterval(() => {
     loadTasksList();
@@ -172,6 +183,15 @@ async function getTaskDetails(taskId) {
     statusEl.innerText = task.status.replace(/_/g, " ");
     statusEl.className = `task-header-badge status-${task.status}`;
 
+    const finishBtn = document.getElementById("btn-finish-task");
+    if (finishBtn) {
+      if (task.status === "completed" || task.status === "failed") {
+        finishBtn.style.display = "none";
+      } else {
+        finishBtn.style.display = "flex";
+      }
+    }
+
     document.getElementById("active-task-step").innerText =
       `Step: ${task.step}`;
 
@@ -213,13 +233,9 @@ async function getTaskDetails(taskId) {
     // Render Workspace Files
     renderFileTree(task.file_tree);
 
-    // Handle Intervention Console
+    // Handle Intervention Console — only show when user action is actually needed
     const consoleEl = document.getElementById("intervention-console");
-    if (
-      task.status === "awaiting_intervention" ||
-      task.status === "completed" ||
-      task.status === "failed"
-    ) {
+    if (task.status === "awaiting_intervention") {
       consoleEl.style.display = "flex";
 
       const proposed = task.proposed_tool;
@@ -862,6 +878,7 @@ async function submitNewTask() {
   }
   const mode = document.getElementById("new-task-mode").value;
   const modelThink = document.getElementById("new-task-model-think").checked;
+  const provider = document.getElementById("new-task-provider").value;
 
   closeModals();
 
@@ -873,6 +890,7 @@ async function submitNewTask() {
         task: taskText,
         mode: mode,
         model_think: modelThink,
+        provider_type: provider,
       }),
     });
     const task = await res.json();
@@ -880,6 +898,7 @@ async function submitNewTask() {
     // Clear fields
     document.getElementById("new-task-prompt").value = "";
     document.getElementById("new-task-model-think").checked = true;
+    document.getElementById("new-task-provider").value = "ollama";
 
     // Select and load the new task
     selectTask(task.task_id);
@@ -973,5 +992,60 @@ function toggleSidebar(open) {
   } else {
     sidebar.classList.remove("open");
     overlay.classList.remove("active");
+  }
+}
+
+let finishOutcome = "completed";
+
+function openFinishTaskModal() {
+  finishOutcome = "completed";
+  document.getElementById("btn-outcome-completed").classList.add("active");
+  document.getElementById("btn-outcome-failed").classList.remove("active");
+  document.getElementById("finish-task-reason").value = "";
+  document.getElementById("modal-finish-task").classList.add("active");
+}
+
+function setFinishOutcome(status) {
+  finishOutcome = status;
+  if (status === "completed") {
+    document.getElementById("btn-outcome-completed").classList.add("active");
+    document.getElementById("btn-outcome-failed").classList.remove("active");
+  } else {
+    document.getElementById("btn-outcome-completed").classList.remove("active");
+    document.getElementById("btn-outcome-failed").classList.add("active");
+  }
+}
+
+async function submitFinishTask() {
+  if (!currentTaskId) return;
+  const reason = document.getElementById("finish-task-reason").value.trim();
+  if (!reason) {
+    alert("Please provide a reason or summary for manually finishing the task.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/action`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "force_complete",
+        status: finishOutcome,
+        reason: reason
+      })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || "Failed to finish task.");
+    }
+
+    closeModals();
+    await getTaskDetails(currentTaskId);
+    await loadTasksList();
+  } catch (err) {
+    alert("Error finishing task: " + err.message);
   }
 }

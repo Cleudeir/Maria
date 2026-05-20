@@ -1,5 +1,5 @@
-from typing import List, Dict, Any, Tuple
-from maria.ollama import format_messages_to_prompt
+from typing import List, Dict, Any, Tuple, Optional, Callable
+from maria.provider.base import format_messages_to_prompt
 from maria.agents.utils import parse_agent_response
 
 
@@ -11,6 +11,7 @@ def execute_steps(
     execution_log: List[Dict[str, Any]],
     errors_encountered: List[Dict[str, Any]],
     get_generate_fn,
+    stream_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[bool, List[str]]:
     """
     Executes the generated steps sequentially using the LLM agentic loop.
@@ -69,6 +70,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 response_text = get_generate_fn(
                     system_text=system_text,
                     user_text=user_text,
+                    progress_callback=stream_callback,
                 )
             except Exception as e:
                 err_msg = f"LLM error: {e}"

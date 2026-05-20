@@ -1,8 +1,7 @@
 import os
 from typing import List, Dict, Tuple
 
-from maria.llm import OllamaClient
-from maria.ollama import getGenerate
+from maria.llm import LLMClient
 from maria.memory import load_system_prompt, load_lessons, add_task_history
 from maria.tools import ToolExecutor
 
@@ -21,29 +20,39 @@ class MariaAgent:
         memory_dir: str,
         ollama_url: str = "http://localhost:11434",
         model_think: bool = True,
+        provider_type: str = "ollama",
     ):
         self.workspace_dir = os.path.abspath(workspace_dir)
         os.makedirs(self.workspace_dir, exist_ok=True)
         self.memory_dir = os.path.abspath(memory_dir)
-        self.client = OllamaClient(base_url=ollama_url, model_think=model_think)
+        self.client = LLMClient(
+            base_url=ollama_url,
+            model_think=model_think,
+            provider_type=provider_type,
+        )
         self.executor = ToolExecutor(self.workspace_dir)
         self.execution_log = []
         self.errors_encountered = []
 
-    def improve_prompt(self, task: str, lessons: List[Dict[str, str]]) -> str:
-        return improve_prompt(task, lessons, get_generate_fn=getGenerate)
+    def improve_prompt(self, task: str, lessons: List[Dict[str, str]], stream_callback=None) -> str:
+        return improve_prompt(
+            task, lessons,
+            get_generate_fn=self.client.provider.generate,
+            stream_callback=stream_callback,
+        )
 
-    def generate_plan(self, improved_prompt: str) -> str:
-        return generate_plan(improved_prompt, get_generate_fn=getGenerate)
+    def generate_plan(self, improved_prompt: str, stream_callback=None) -> str:
+        return generate_plan(improved_prompt, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
 
-    def create_steps(self, plan: str) -> List[str]:
-        return create_steps(plan, get_generate_fn=getGenerate)
+    def create_steps(self, plan: str, stream_callback=None) -> List[str]:
+        return create_steps(plan, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
 
     def execute_steps(
         self,
         steps: List[str],
         plan: str,
         system_message: str,
+        stream_callback=None,
     ) -> Tuple[bool, List[str]]:
         return execute_steps(
             steps=steps,
@@ -52,11 +61,12 @@ class MariaAgent:
             executor=self.executor,
             execution_log=self.execution_log,
             errors_encountered=self.errors_encountered,
-            get_generate_fn=getGenerate,
+            get_generate_fn=self.client.provider.generate,
+            stream_callback=stream_callback,
         )
 
-    def verify_execution(self, plan: str, steps: List[str]) -> Tuple[str, str]:
-        return verify_execution(self.workspace_dir, plan, steps, get_generate_fn=getGenerate)
+    def verify_execution(self, plan: str, steps: List[str], stream_callback=None) -> Tuple[str, str]:
+        return verify_execution(self.workspace_dir, plan, steps, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
 
     def run(self, task: str, max_steps: int = 20) -> bool:
         """

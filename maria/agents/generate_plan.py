@@ -1,4 +1,10 @@
-def generate_plan(improved_prompt: str, get_generate_fn) -> str:
+from typing import Optional, Callable
+
+def generate_plan(
+    improved_prompt: str,
+    get_generate_fn,
+    stream_callback: Optional[Callable[[str], None]] = None,
+) -> str:
     prompt = f"""You are a senior software architect. Based on the following detailed task description, generate a complete, comprehensive implementation plan.
 The plan must describe:
 1. Architecture & Design Choices
@@ -19,5 +25,6 @@ Provide the complete plan in clear Markdown. No conversational preamble.
     response = get_generate_fn(
         system_text="You are a software architect assistant.",
         user_text=prompt,
+        progress_callback=stream_callback,
     )
     return response.strip()

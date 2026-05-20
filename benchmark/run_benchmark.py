@@ -11,6 +11,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+os.environ["MARIA_BENCHMARK"] = "1"
+
 from maria.agents import MariaAgent
 import benchmark.test_cases as test_cases
 
@@ -60,7 +62,10 @@ def run_task(task, workspace_base, memory_dir, ollama_url, max_steps):
     else:
         print(f"🔍 Running verification function: {verifier_name}...")
         try:
-            verifier(task_workspace)
+            target_path = os.path.join(task_workspace, "output")
+            if not os.path.exists(target_path):
+                target_path = task_workspace
+            verifier(target_path)
             verification_success = True
             print("✅ Verification PASSED!")
         except AssertionError as e:
@@ -223,7 +228,10 @@ def main():
                 verification_error = f"Verifier {verifier_name} not found"
             else:
                 try:
-                    verifier(task_workspace)
+                    target_path = os.path.join(task_workspace, "output")
+                    if not os.path.exists(target_path):
+                        target_path = task_workspace
+                    verifier(target_path)
                     verification_success = True
                 except AssertionError as e:
                     verification_error = str(e)
