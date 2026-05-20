@@ -3,7 +3,6 @@ import json
 import requests
 import threading
 import re
-import collections
 from typing import List, Dict, Any, Optional, Callable
 from dotenv import load_dotenv
 
@@ -12,26 +11,6 @@ from maria.provider.base import LLMProvider, format_messages_to_prompt as shared
 
 class LoopDetectedError(Exception):
     pass
-
-
-def detect_loop(text: str, min_repeat: int = 3) -> Optional[str]:
-    if not isinstance(text, str) or len(text) < 50:
-        return None
-
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-    line_counts = collections.Counter(lines)
-    for line, count in line_counts.items():
-        if count >= min_repeat and len(line) > 10:
-            return f"line repeated {count}x: {line[:80]}"
-
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
-    sent_counts = collections.Counter(sentences)
-    for sent, count in sent_counts.items():
-        if count >= min_repeat:
-            return f"sentence repeated {count}x: {sent[:80]}"
-
-    return None
 
 
 _thread_local = threading.local()
@@ -167,9 +146,6 @@ class OllamaProvider(LLMProvider):
                 thinking_output = ""
                 response_output = ""
                 last_event = None
-                loop_check_counter = 0
-                thinking_loop_counter = 0
-                loop_detected = False
 
                 for raw_line in response.iter_lines(decode_unicode=True):
                     if not raw_line:
@@ -180,23 +156,9 @@ class OllamaProvider(LLMProvider):
 
                         if event.get("thinking"):
                             thinking_output += event["thinking"]
-                            thinking_loop_counter += 1
 
                             with open(path_thinker_file, "w") as f:
                                 f.write("")
-
-                            if thinking_loop_counter % 10 == 0 and len(thinking_output) > 200:
-                                loop_pattern = detect_loop(thinking_output)
-                                if loop_pattern:
-                                    print(
-                                        f"[Ollama] Thinking loop detected "
-                                        f"(attempt {attempt + 1}): {loop_pattern}",
-                                        flush=True,
-                                    )
-                                    with open(path_thinker_file, "a") as f:
-                                        f.write(f"\n\n[THINKING LOOP DETECTED - {loop_pattern}]\n")
-                                    loop_detected = True
-                                    break  # abort streaming → retry full request
 
                             print(f"[Ollama] Thought: {len(thinking_output)} characters")
                             with open("maria_thinking.log", "a") as f:
@@ -204,17 +166,6 @@ class OllamaProvider(LLMProvider):
 
                         if isinstance(event.get("response"), str):
                             response_output += event["response"]
-                            loop_check_counter += 1
-                            if loop_check_counter % 5 == 0 and len(response_output) > 100:
-                                loop_pattern = detect_loop(response_output)
-                                if loop_pattern:
-                                    print(
-                                        f"[Ollama] Response loop detected "
-                                        f"(attempt {attempt + 1}): {loop_pattern}",
-                                        flush=True,
-                                    )
-                                    loop_detected = True
-                                    break  # abort streaming → retry full request
                             if progress_callback:
                                 progress_callback(strip_thinking_process(response_output))
 
@@ -227,23 +178,12 @@ class OllamaProvider(LLMProvider):
                 if last_event:
                     self._set_last_usage(_parse_metrics(last_event))
 
-                if not loop_detected:
-                    # Clean generation — return immediately
-                    return strip_thinking_process(response_output)
-
-                # Loop detected — discard response and retry
-                print("[Ollama] Discarding looped response, retrying step...", flush=True)
+                return strip_thinking_process(response_output)
 
             except requests.exceptions.ConnectionError:
                 raise RuntimeError("Ollama not in use. Make sure ollama is running.")
             except requests.exceptions.RequestException as e:
                 raise RuntimeError(f"Ollama request failed: {e}")
-
-        # All retries exhausted
-        raise LoopDetectedError(
-            f"Ollama stuck in a loop after {self._MAX_LOOP_RETRIES} attempts. "
-            "The model cannot produce a non-repetitive response for this input."
-        )
 
     def chat(
         self,

@@ -581,6 +581,55 @@ body {
     border-color: rgba(239, 68, 68, 0.4);
 }
 
+.btn-action#btn-restart-task {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+}
+
+.btn-action#btn-restart-task:hover {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: var(--color-warning);
+}
+
+.task-motivo {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 12px 16px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: 8px;
+}
+
+.task-motivo-icon {
+    color: var(--color-danger);
+    font-size: 18px;
+    line-height: 1.4;
+    flex-shrink: 0;
+}
+
+.task-motivo-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.task-motivo-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--color-danger);
+    margin-bottom: 4px;
+}
+
+.task-motivo-text {
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    word-break: break-word;
+}
+
 /* Columns Splitter */
 .workspace-split {
     flex: 1;
@@ -633,6 +682,7 @@ body {
     background: rgba(15, 23, 42, 0.98);
     font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
     overflow-x: auto;
+    height: 200px;
 }
 
 .streaming-panel .streaming-header span {

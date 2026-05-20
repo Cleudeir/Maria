@@ -35,6 +35,10 @@ from maria.memory import (
     save_lessons,
 )
 from maria.self_improvement import SelfImprovementAgent
+from maria.provider.ollama import LoopDetectedError
+from maria.step_checkpoint import save_checkpoint, load_checkpoint, restore_checkpoint_into_state, clear_checkpoint
+
+MAX_STAGE_RETRIES = 3
 
 # Set server environment variable for bypassing security console prompts
 os.environ["MARIA_SERVER"] = "1"
@@ -334,6 +338,9 @@ def run_agent_step_sync(
     if "supervision_log" not in state:
         state["supervision_log"] = []
 
+    if "stage_retries" not in state:
+        state["stage_retries"] = 0
+
     if state["status"] not in (
         "running",
         "awaiting_intervention",
@@ -451,6 +458,7 @@ def run_agent_step_sync(
 
             # Transition to generating plan
             state["stage"] = "generating_plan"
+            state["stage_retries"] = 0
             state["proposed_tool"] = {
                 "name": "generate_plan",
                 "args": {},
@@ -460,6 +468,17 @@ def run_agent_step_sync(
                 state["status"] = "awaiting_intervention"
             else:
                 state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+        except LoopDetectedError as e:
+            state["stage_retries"] += 1
+            if state["stage_retries"] >= MAX_STAGE_RETRIES:
+                state["status"] = "failed"
+                state["proposed_tool"] = None
+                state["details"] = f"Failed to improve prompt: {e}"
+            else:
+                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["status"] = "running"
+            print(f"[Stage] improving_prompt loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
@@ -496,6 +515,7 @@ def run_agent_step_sync(
 
             # Transition to creating steps
             state["stage"] = "creating_steps"
+            state["stage_retries"] = 0
             state["proposed_tool"] = {
                 "name": "create_steps",
                 "args": {},
@@ -505,6 +525,17 @@ def run_agent_step_sync(
                 state["status"] = "awaiting_intervention"
             else:
                 state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+        except LoopDetectedError as e:
+            state["stage_retries"] += 1
+            if state["stage_retries"] >= MAX_STAGE_RETRIES:
+                state["status"] = "failed"
+                state["proposed_tool"] = None
+                state["details"] = f"Failed to generate plan: {e}"
+            else:
+                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["status"] = "running"
+            print(f"[Stage] generating_plan loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
@@ -537,6 +568,7 @@ def run_agent_step_sync(
 
             # Transition to executing steps
             state["stage"] = "executing_steps"
+            state["stage_retries"] = 0
             state["current_step_idx"] = 0
             state["completed_step_summaries"] = []
 
@@ -549,6 +581,17 @@ def run_agent_step_sync(
                 state["status"] = "awaiting_intervention"
             else:
                 state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+        except LoopDetectedError as e:
+            state["stage_retries"] += 1
+            if state["stage_retries"] >= MAX_STAGE_RETRIES:
+                state["status"] = "failed"
+                state["proposed_tool"] = None
+                state["details"] = f"Failed to create steps: {e}"
+            else:
+                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["status"] = "running"
+            print(f"[Stage] creating_steps loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
@@ -669,6 +712,8 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                     }
                 )
 
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+
             # Get next tool proposal
             state = run_llm_for_tool(state, client)
 
@@ -703,7 +748,19 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
             state["verification_report"] = report
             state["verification_verdict"] = verdict
             state["stage"] = "supervisor_review"
+            state["stage_retries"] = 0
             state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+        except LoopDetectedError as e:
+            state["stage_retries"] += 1
+            if state["stage_retries"] >= MAX_STAGE_RETRIES:
+                state["status"] = "failed"
+                state["details"] = f"Failed to verify execution: {e}"
+                trigger_self_improvement(task_id, state)
+            else:
+                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["status"] = "running"
+            print(f"[Stage] verifying loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
         except Exception as e:
             state["status"] = "failed"
             state["details"] = f"Failed to verify execution: {e}"
@@ -763,7 +820,18 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                     )
                 except Exception:
                     pass
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
             trigger_self_improvement(task_id, state)
+        except LoopDetectedError as e:
+            state["stage_retries"] += 1
+            if state["stage_retries"] >= MAX_STAGE_RETRIES:
+                state["status"] = "failed"
+                state["details"] = f"Failed to review execution: {e}"
+                trigger_self_improvement(task_id, state)
+            else:
+                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["status"] = "running"
+            print(f"[Stage] supervisor_review loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
         except Exception as e:
             state["status"] = "failed"
             state["details"] = f"Failed to review execution: {e}"
@@ -798,6 +866,20 @@ def run_llm_for_tool(state, client):
                 temperature=0.1,
                 stream_callback=_streaming_callback,
             )
+        except LoopDetectedError:
+            state["is_streaming"] = False
+            state["step"] -= 1
+            state["stage_retries"] = state.get("stage_retries", 0) + 1
+            if state["stage_retries"] >= MAX_STAGE_RETRIES:
+                err_msg = f"LLM loop detected after {MAX_STAGE_RETRIES} retries"
+                state["status"] = "failed"
+                state["details"] = err_msg
+                save_task_state(state["task_id"], state)
+                return state
+            state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - LLM loop detected"
+            state["status"] = "running"
+            save_task_state(state["task_id"], state)
+            continue
         except Exception as e:
             err_msg = f"LLM error: {e}"
             state["errors_encountered"].append(
@@ -877,6 +959,7 @@ def run_llm_for_tool(state, client):
                     state["status"] = "running"
             else:
                 state["stage"] = "verifying"
+                state["stage_retries"] = 0
                 state["proposed_tool"] = {
                     "name": "verify_execution",
                     "args": {},
@@ -886,6 +969,7 @@ def run_llm_for_tool(state, client):
                     state["status"] = "awaiting_intervention"
                 else:
                     state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, state["task_id"], state)
             return state
 
         state["proposed_tool"] = {"name": tool_name, "args": args, "thought": thought}
@@ -893,6 +977,7 @@ def run_llm_for_tool(state, client):
             state["status"] = "awaiting_intervention"
         else:
             state["status"] = "running"
+        save_checkpoint(WORKSPACE_DIR, state["task_id"], state)
         return state
 
 
@@ -1307,6 +1392,39 @@ def post_task_action(task_id):
 
         return jsonify(state)
 
+    if action == "resume":
+        checkpoint = load_checkpoint(WORKSPACE_DIR, task_id)
+        if checkpoint:
+            state = restore_checkpoint_into_state(checkpoint, state)
+            clear_checkpoint(WORKSPACE_DIR, task_id)
+            state["is_streaming"] = False
+            state["current_streaming_response"] = ""
+            # Clear proposed_tool so the engine re-evaluates the next action
+            state["proposed_tool"] = None
+            resolution = "Resumed from checkpoint at stage '{stage}', step {step}".format(
+                stage=checkpoint.get("stage", "unknown"),
+                step=checkpoint.get("step", 0),
+            )
+            state["details"] = resolution
+            state["execution_log"].append({
+                "step": state.get("step", 0) + 1,
+                "role": "system",
+                "content": f"🔄 {resolution}",
+            })
+
+        if state.get("status") in ("completed", "failed"):
+            return jsonify(state)
+
+        if state.get("mode") == "auto":
+            state["status"] = "running"
+            save_task_state(task_id, state)
+            _start_background_thread(task_id)
+        else:
+            state["status"] = "awaiting_intervention"
+            save_task_state(task_id, state)
+
+        return jsonify(state)
+
     # Guard: don't start a new thread if one is already running for this task
     existing_thread = active_threads.get(task_id)
     if existing_thread and existing_thread.is_alive():
@@ -1367,6 +1485,7 @@ def restart_task(task_id):
     # Reset execution state but keep task description, mode and logs
     state["status"] = "running"
     state["stage"] = "improving_prompt"
+    state["stage_retries"] = 0
     state["step"] = 0
     state["messages"] = []
     state["errors_encountered"] = []
@@ -1566,41 +1685,76 @@ def manage_lessons():
 
 
 def mark_incomplete_task_after_restart(task_id, state):
-    """Mark a task incomplete when the application restarts during Ollama streaming."""
+    """
+    Mark a task incomplete when the application restarts.
+    If a checkpoint exists, restores the checkpoint for seamless resume.
+    Otherwise, falls back to safe defaults.
+    """
     mode = state.get("mode", "step")
-
     state["is_streaming"] = False
 
-    if mode == "auto":
-        state["status"] = "failed"
+    # Try to restore from checkpoint for granular resume
+    checkpoint = load_checkpoint(WORKSPACE_DIR, task_id)
+    if checkpoint:
+        restore_checkpoint_into_state(checkpoint, state)
+        # Clear proposed_tool to force LLM to re-evaluate on resume
+        # (avoids re-executing a tool that may have already been applied)
         state["proposed_tool"] = None
-        state["details"] = (
-            "Task was interrupted by application restart while Ollama streaming was active. "
-            "The task is incomplete and must be restarted manually."
-        )
-        print(
-            f"[Startup] Marked auto task {task_id} as failed due to restart during Ollama streaming",
-            flush=True,
-        )
+        state["is_streaming"] = False
+
+        if mode == "auto":
+            state["status"] = "running"
+            state["details"] = (
+                "Task was interrupted by application restart. "
+                "Auto-resuming from last checkpoint."
+            )
+            print(
+                f"[Startup] Restored auto task {task_id} from checkpoint, resuming...",
+                flush=True,
+            )
+        else:
+            state["status"] = "awaiting_intervention"
+            state["details"] = (
+                "Task was interrupted by application restart. "
+                "Checkpoint restored. Please review and resume execution."
+            )
+            print(
+                f"[Startup] Restored step task {task_id} from checkpoint, awaiting user...",
+                flush=True,
+            )
+
+        clear_checkpoint(WORKSPACE_DIR, task_id)
     else:
-        state["status"] = "awaiting_intervention"
-        state["details"] = (
-            "Task was interrupted by application restart while Ollama streaming was active. "
-            "Please review and resume execution manually."
-        )
-        print(
-            f"[Startup] Reset step task {task_id} status to awaiting_intervention due to restart",
-            flush=True,
-        )
+        if mode == "auto":
+            state["status"] = "failed"
+            state["proposed_tool"] = None
+            state["details"] = (
+                "Task was interrupted by application restart. "
+                "No checkpoint available. Please restart the task manually."
+            )
+            print(
+                f"[Startup] Marked auto task {task_id} as failed (no checkpoint)",
+                flush=True,
+            )
+        else:
+            state["status"] = "awaiting_intervention"
+            state["details"] = (
+                "Task was interrupted by application restart. "
+                "No checkpoint available. Please review and resume execution manually."
+            )
+            print(
+                f"[Startup] Reset step task {task_id} to awaiting_intervention (no checkpoint)",
+                flush=True,
+            )
 
     save_task_state(task_id, state)
 
 
 def resume_incomplete_tasks():
     """
-    Scans workspace for incomplete tasks and marks them incomplete after a restart.
-    If task mode is auto, the task is failed because streaming Ollama cannot safely resume.
-    If task mode is step, the task is reset to awaiting_intervention for manual recovery.
+    Scans workspace for incomplete tasks and resumes them from checkpoints.
+    Auto-mode tasks with checkpoints are automatically restarted in the background.
+    Step-mode tasks are reset to awaiting_intervention for manual recovery.
     """
     print("[Startup] Scanning for incomplete tasks to resume...", flush=True)
     if not os.path.exists(WORKSPACE_DIR):
@@ -1625,11 +1779,47 @@ def resume_incomplete_tasks():
                     flush=True,
                 )
                 mark_incomplete_task_after_restart(task_id, state)
+
+                # For auto tasks that were successfully restored to running,
+                # start a background execution thread
+                restored = load_task_state(task_id)
+                if restored and restored.get("status") == "running" and mode == "auto":
+                    print(
+                        f"[Startup] Launching background resume for auto task {task_id}",
+                        flush=True,
+                    )
+                    _start_background_thread(task_id)
         except Exception as e:
             print(
                 f"[Startup] Error processing task folder {folder}: {e}",
                 flush=True,
             )
+
+
+def _start_background_thread(task_id):
+    """Start a background execution thread for a task (if not already running)."""
+    existing = active_threads.get(task_id)
+    if existing and existing.is_alive():
+        return
+
+    def _run():
+        try:
+            background_execution_loop(task_id)
+        except Exception as e:
+            print(f"[Background] Loop crashed for {task_id}: {e}", flush=True)
+            try:
+                s = load_task_state(task_id)
+                if s and s.get("status") not in ("completed", "failed"):
+                    s["status"] = "failed"
+                    s["details"] = f"Background loop error: {e}"
+                    save_task_state(task_id, s)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_run)
+    thread.daemon = True
+    thread.start()
+    active_threads[task_id] = thread
 
 
 def shutdown_handler(signum=None, frame=None):

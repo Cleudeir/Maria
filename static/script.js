@@ -192,6 +192,22 @@ async function getTaskDetails(taskId) {
       }
     }
 
+    const restartBtn = document.getElementById("btn-restart-task");
+    const motivoEl = document.getElementById("task-motivo");
+    const motivoText = document.getElementById("task-motivo-text");
+    if (task.status === "failed") {
+      if (restartBtn) restartBtn.style.display = "flex";
+      if (motivoEl && task.details) {
+        motivoText.innerText = task.details;
+        motivoEl.style.display = "flex";
+      } else if (motivoEl) {
+        motivoEl.style.display = "none";
+      }
+    } else {
+      if (restartBtn) restartBtn.style.display = "none";
+      if (motivoEl) motivoEl.style.display = "none";
+    }
+
     document.getElementById("active-task-step").innerText =
       `Step: ${task.step}`;
 
@@ -768,6 +784,28 @@ async function saveEditorContent() {
     }
   } catch (err) {
     console.error("Error saving file", err);
+  }
+}
+
+// Restart failed task
+async function restartTask() {
+  if (!currentTaskId) return;
+  if (!confirm("Are you sure you want to restart this failed task?")) return;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/restart`, {
+      method: "POST",
+    });
+    if (res.ok) {
+      await getTaskDetails(currentTaskId);
+      await loadTasksList();
+    } else {
+      const errData = await res.json();
+      alert("Failed to restart task: " + (errData.error || "Unknown error"));
+    }
+  } catch (err) {
+    console.error("Error restarting task", err);
+    alert("Error restarting task: " + err.message);
   }
 }
 
