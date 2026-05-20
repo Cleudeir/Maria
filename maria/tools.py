@@ -65,13 +65,13 @@ class ToolExecutor:
         """
         if not is_path_safe(self.workspace_dir, path):
             return "Error: Access Denied. Path is outside workspace."
-        
+
         target_dir = os.path.abspath(os.path.join(self.workspace_dir, path))
         if not os.path.exists(target_dir):
             return f"Error: Path '{path}' does not exist."
         if not os.path.isdir(target_dir):
             return f"Error: Path '{path}' is not a directory."
-            
+
         try:
             items = os.listdir(target_dir)
             result = []
@@ -92,13 +92,13 @@ class ToolExecutor:
         """
         if not is_path_safe(self.workspace_dir, path):
             return "Error: Access Denied. Path is outside workspace."
-            
+
         target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
         if not os.path.exists(target_file):
             return f"Error: File '{path}' does not exist."
         if os.path.isdir(target_file):
             return f"Error: Path '{path}' is a directory, not a file."
-            
+
         filename = os.path.basename(target_file)
         if filename in ("task_state.json", "task_info.html"):
             return "Error: Access Denied. Internal system file."
@@ -115,9 +115,9 @@ class ToolExecutor:
         """
         if not is_path_safe(self.workspace_dir, path):
             return "Error: Access Denied. Path is outside workspace."
-            
+
         target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
-        
+
         filename = os.path.basename(target_file)
         if filename in ("task_state.json", "task_info.html"):
             return "Error: Access Denied. Internal system file."

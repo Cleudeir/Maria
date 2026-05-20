@@ -1,0 +1,212 @@
+[
+  {
+    "id": 1,
+    "difficulty": "simple",
+    "name": "Prime Checker",
+    "prompt": "Create a Python file named 'prime_checker.py' containing a function 'is_prime(n: int) -> bool' that returns True if n is prime and False otherwise. Handle n <= 1 correctly (should return False). Do not include any CLI code or other functions.",
+    "target_file": "prime_checker.py"
+  },
+  {
+    "id": 2,
+    "difficulty": "simple",
+    "name": "String Reverser",
+    "prompt": "Create a Python file named 'string_utils.py' containing a function 'reverse_string(s: str) -> str' that returns the input string reversed. Do not include other functions.",
+    "target_file": "string_utils.py"
+  },
+  {
+    "id": 3,
+    "difficulty": "simple",
+    "name": "Factorial Calculator",
+    "prompt": "Create a Python file named 'math_operations.py' containing a function 'factorial(n: int) -> int' that calculates the factorial of a non-negative integer n. Return 1 if n is 0 or 1. Do not use external libraries.",
+    "target_file": "math_operations.py"
+  },
+  {
+    "id": 4,
+    "difficulty": "simple",
+    "name": "JSON Config Writer",
+    "prompt": "Create a JSON file named 'config.json' with the following exact structure: a key 'app_name' with value 'MariaTest', a key 'version' with value '1.0.0', and a key 'enabled' with value true.",
+    "target_file": "config.json"
+  },
+  {
+    "id": 5,
+    "difficulty": "simple",
+    "name": "Celsius to Fahrenheit Converter",
+    "prompt": "Create a Python file named 'temp_converter.py' containing a function 'celsius_to_fahrenheit(c: float) -> float' that converts a temperature from Celsius to Fahrenheit using the formula (C * 9/5) + 32.",
+    "target_file": "temp_converter.py"
+  },
+  {
+    "id": 6,
+    "difficulty": "simple",
+    "name": "Even Number Filter",
+    "prompt": "Create a Python file named 'list_utils.py' containing a function 'get_evens(numbers: list) -> list' that filters and returns only the even integers from the input list 'numbers'.",
+    "target_file": "list_utils.py"
+  },
+  {
+    "id": 7,
+    "difficulty": "simple",
+    "name": "Markdown README Creator",
+    "prompt": "Create a markdown file named 'README.md' that starts with a level 1 heading '# Project Maria' followed by a blank line, then a line 'This is a test project.', another blank line, and a bulleted list of 2 items: '* Item 1' and '* Item 2'.",
+    "target_file": "README.md"
+  },
+  {
+    "id": 8,
+    "difficulty": "simple",
+    "name": "Word Frequency Counter",
+    "prompt": "Create a Python file named 'word_count.py' containing a function 'count_words(text: str) -> dict' that counts the frequency of words in a space-separated string 'text'. Ignore case (convert everything to lowercase) and strip common punctuation (.,?!;). Return a dictionary mapping words to their counts.",
+    "target_file": "word_count.py"
+  },
+  {
+    "id": 9,
+    "difficulty": "simple",
+    "name": "Basic File Merger",
+    "prompt": "Create a Python script named 'file_merger.py' that reads two files 'a.txt' and 'b.txt' in the same directory, concatenates their contents with a single newline character in between, and writes the merged text to a new file named 'merged.txt'.",
+    "target_file": "file_merger.py"
+  },
+  {
+    "id": 10,
+    "difficulty": "simple",
+    "name": "Calculate Average",
+    "prompt": "Create a Python file named 'stats.py' containing a function 'calculate_average(numbers: list) -> float' that calculates the mean of a list of numbers. If the list is empty, return 0.0.",
+    "target_file": "stats.py"
+  },
+  {
+    "id": 11,
+    "difficulty": "medium",
+    "name": "Fibonacci Generator",
+    "prompt": "Create a Python file named 'fibonacci.py' containing a function 'fibonacci_sequence(limit: int) -> list' that returns a list of all Fibonacci numbers less than or equal to 'limit'. Assume the sequence starts with [0, 1]. For example, for limit=10, the output should be [0, 1, 1, 2, 3, 5, 8].",
+    "target_file": "fibonacci.py"
+  },
+  {
+    "id": 12,
+    "difficulty": "medium",
+    "name": "Geometric Shapes Polymorphism",
+    "prompt": "Create a Python file named 'geometry.py' containing a base class 'Shape' with a method 'area() -> float' that raises NotImplementedError. Implement two subclasses 'Circle' (taking 'radius: float' in the constructor) and 'Rectangle' (taking 'width: float' and 'height: float' in the constructor) that override 'area()' with their correct area calculations. Use math.pi for Circle.",
+    "target_file": "geometry.py"
+  },
+  {
+    "id": 13,
+    "difficulty": "medium",
+    "name": "CSV User Parser",
+    "prompt": "Create a Python file named 'csv_parser.py' containing a function 'parse_user_csv(filepath: str) -> list' that reads a CSV file containing columns 'id', 'name', and 'email'. It must return a list of dictionaries, where each row is represented by a dictionary mapping column headers to row values. The 'id' field value must be converted to an integer. If the file is empty, return an empty list.",
+    "target_file": "csv_parser.py"
+  },
+  {
+    "id": 14,
+    "difficulty": "medium",
+    "name": "Simple Stack",
+    "prompt": "Create a Python file named 'stack.py' implementing a class 'Stack' with the following methods: 'push(item: Any) -> None' to add an item to the top, 'pop() -> Any' to remove and return the top item, 'peek() -> Any' to return the top item without removing it, 'is_empty() -> bool' to check if the stack is empty, and 'size() -> int' to return the current size. Raise an IndexError if 'pop()' or 'peek()' is called on an empty stack.",
+    "target_file": "stack.py"
+  },
+  {
+    "id": 15,
+    "difficulty": "medium",
+    "name": "Password Generator",
+    "prompt": "Create a Python file named 'password_gen.py' containing a function 'generate_password(length: int) -> str' that returns a random alphanumeric string of length 'length'. The password MUST contain at least one uppercase letter, one lowercase letter, and one digit. If length < 3, raise a ValueError.",
+    "target_file": "password_gen.py"
+  },
+  {
+    "id": 16,
+    "difficulty": "medium",
+    "name": "Caesar Cipher",
+    "prompt": "Create a Python file named 'caesar.py' containing two functions: 'encrypt(text: str, shift: int) -> str' and 'decrypt(text: str, shift: int) -> str'. Shift only alphabetical characters (both upper and lower case, wrapping around the alphabet), and preserve any spaces, digits, or punctuation unchanged.",
+    "target_file": "caesar.py"
+  },
+  {
+    "id": 17,
+    "difficulty": "medium",
+    "name": "JSON Database Class",
+    "prompt": "Create a Python file named 'json_db.py' implementing a class 'JSONDatabase' initialized with a file path. It should have the following methods: 'insert(id_val: str, data: dict) -> None' to add or overwrite a record, 'get(id_val: str) -> dict' to retrieve a record by ID (or return None if not found), 'update(id_val: str, data: dict) -> bool' to update keys of an existing record (return True if updated, False if ID not found), and 'delete(id_val: str) -> bool' (return True if deleted, False if ID not found). Save the current state to the JSON file after every modification.",
+    "target_file": "json_db.py"
+  },
+  {
+    "id": 18,
+    "difficulty": "medium",
+    "name": "Directory Extension Scanner",
+    "prompt": "Create a Python file named 'dir_scanner.py' containing a function 'count_file_types(directory_path: str) -> dict' that recursively walks through the directory 'directory_path' and returns a dictionary mapping lowercased file extensions (e.g. '.py', '.json', '.txt') to the total count of files with that extension. If a file has no extension (no dot in filename, or only a leading dot like .gitignore), use the key 'no_extension'. Ignore directories.",
+    "target_file": "dir_scanner.py"
+  },
+  {
+    "id": 19,
+    "difficulty": "medium",
+    "name": "Multi-key User Sorter",
+    "prompt": "Create a Python file named 'sorter.py' containing a function 'sort_users(users: list) -> list' that sorts a list of user dictionaries. Each dictionary has keys 'name' (str) and 'age' (int). The list must be sorted primarily by 'age' (ascending) and secondarily by 'name' (alphabetically, ascending) if ages are equal. Return the sorted list.",
+    "target_file": "sorter.py"
+  },
+  {
+    "id": 20,
+    "difficulty": "medium",
+    "name": "IPv4 Address Validator",
+    "prompt": "Create a Python file named 'ipv4_validator.py' containing a function 'is_valid_ipv4(ip: str) -> bool' that validates if the string 'ip' represents a valid IPv4 address. It must check for four dot-separated octets, each octet must be an integer between 0 and 255, and no leading zeroes are allowed for octets except for '0' itself (e.g. '192.168.01.1' is invalid, but '192.168.0.1' is valid).",
+    "target_file": "ipv4_validator.py"
+  },
+  {
+    "id": 21,
+    "difficulty": "expert",
+    "name": "Arithmetic Expression Evaluator",
+    "prompt": "Create a Python file named 'calculator.py' containing a function 'evaluate_expression(expression: str) -> float' that evaluates simple arithmetic mathematical expressions containing numbers, operators '+', '-', '*', '/' and parentheses '(', ')'. Support standard operator precedence. Do not use Python's built-in 'eval' or 'exec' functions.",
+    "target_file": "calculator.py"
+  },
+  {
+    "id": 22,
+    "difficulty": "expert",
+    "name": "Concurrent Worker Pool",
+    "prompt": "Create a Python file named 'worker_pool.py' implementing a class 'SimpleWorkerPool' that manages concurrent task execution. The constructor must take 'num_threads: int'. It must have a method 'submit(func, *args, **kwargs) -> None' to queue a function call, and 'join() -> None' to block until all queued tasks are executed. Results of task executions must be stored in a thread-safe list attribute 'results' on the pool instance.",
+    "target_file": "worker_pool.py"
+  },
+  {
+    "id": 23,
+    "difficulty": "expert",
+    "name": "Base64 Encoder and Decoder",
+    "prompt": "Create a Python file named 'base64_codec.py' containing two functions: 'encode_base64(data: bytes) -> str' and 'decode_base64(encoded: str) -> bytes'. Implement the standard Base64 encoding and decoding algorithms from scratch. Do not import or use Python's built-in 'base64', 'binascii', or external cryptography libraries.",
+    "target_file": "base64_codec.py"
+  },
+  {
+    "id": 24,
+    "difficulty": "expert",
+    "name": "Simple SQL Select Query Parser",
+    "prompt": "Create a Python file named 'sql_parser.py' containing a function 'parse_select_query(query: str) -> dict' that parses basic SQL SELECT queries of the form: 'SELECT col1, col2 FROM table_name WHERE col3 = value'. Return a dictionary with structure: {'fields': ['col1', 'col2'], 'table': 'table_name', 'where': {'column': 'col3', 'value': 'value'}}. Support simple single-quote stripping for string values, or integer conversions if value is numeric. If the query format is invalid, raise a ValueError.",
+    "target_file": "sql_parser.py"
+  },
+  {
+    "id": 25,
+    "difficulty": "expert",
+    "name": "Binary Run-length Encoder/Decoder",
+    "prompt": "Create a Python file named 'rle.py' containing two functions: 'rle_encode(data: bytes) -> bytes' and 'rle_decode(data: bytes) -> bytes'. The encoding should compress sequential repeated bytes into a format where each run is represented by the byte value followed by the count of repetitions (as a single byte). For example, b'AAA' (65, 65, 65) is encoded to bytes([65, 3]). If a run is longer than 255, split it into multiple runs.",
+    "target_file": "rle.py"
+  },
+  {
+    "id": 26,
+    "difficulty": "expert",
+    "name": "Tic-Tac-Toe Minimax AI",
+    "prompt": "Create a Python file named 'tictactoe.py' containing a class 'TicTacToe' that manages a 3x3 board (initially empty). It should have: 'make_move(row: int, col: int, player: str) -> bool' to make a move (return True if successful, False if invalid or cell occupied), 'check_winner() -> str' (returns 'X', 'O', 'Draw', or None if in progress), and 'best_move(player: str) -> tuple' which uses the minimax algorithm to return the coordinates (row, col) representing the optimal move for 'player' (X or O).",
+    "target_file": "tictactoe.py"
+  },
+  {
+    "id": 27,
+    "difficulty": "expert",
+    "name": "Token Lexer",
+    "prompt": "Create a Python file named 'lexer.py' containing a function 'tokenize(code: str) -> list' that scans a string of code and returns a list of dictionaries, each containing 'type' and 'value'. Support token types: 'KEYWORD' (if, else, while, return), 'IDENTIFIER' (alphabetic variable names), 'NUMBER' (digits), 'OPERATOR' (+, -, *, /, =), and 'SEMICOLON' (;). Ignore spaces and tabs. Raise a ValueError if an invalid character is encountered.",
+    "target_file": "lexer.py"
+  },
+  {
+    "id": 28,
+    "difficulty": "expert",
+    "name": "Thread-safe Key-Value Store with TTL",
+    "prompt": "Create a Python file named 'kv_store.py' implementing a class 'TTLKeyValueStore'. It must be thread-safe (use threading.Lock). Methods: 'set(key: str, value: Any, ttl_seconds: float = None) -> None', 'get(key: str) -> Any' (returns the value, or None if key does not exist or has expired), and 'delete(key: str) -> bool' (return True if deleted, False if key not found). Expired keys must be cleaned up dynamically on access.",
+    "target_file": "kv_store.py"
+  },
+  {
+    "id": 29,
+    "difficulty": "expert",
+    "name": "Regex Matcher from Scratch",
+    "prompt": "Create a Python file named 'regex_matcher.py' containing a function 'match_pattern(pattern: str, text: str) -> bool' that checks if 'pattern' matches 'text' from start to end. Support literal characters, '.' (matches any single character), '*' (matches zero or more repetitions of the preceding character), '^' (anchor start), and '$' (anchor end). Do not import the built-in 're' library.",
+    "target_file": "regex_matcher.py"
+  },
+  {
+    "id": 30,
+    "difficulty": "expert",
+    "name": "Dependency Injection Container",
+    "prompt": "Create a Python file named 'di_container.py' implementing a class 'Container'. It must support registering dependencies: 'register_singleton(name: str, cls: type, dependencies: list = []) -> None', 'register_transient(name: str, cls: type, dependencies: list = []) -> None', and resolving them: 'resolve(name: str) -> object'. The 'dependencies' argument lists the names of other registered classes that must be injected into the class constructor. For singleton, return the same instance; for transient, return a new instance.",
+    "target_file": "di_container.py"
+  }
+]

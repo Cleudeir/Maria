@@ -29,7 +29,7 @@ def test_parse_compacted_lessons_response():
     assert lessons[1]["error"] == "Expected tests to fail, but they passed or missing tests"
     assert lessons[1]["resolution"] == "Implement test files first before starting application code."
 
-def test_compact_lessons_integration(tmpdir):
+def test_compact_lessons_integration(tmpdir, monkeypatch):
     memory_dir = str(tmpdir)
     
     # Create mock files
@@ -62,7 +62,7 @@ def test_compact_lessons_integration(tmpdir):
         
     # Initialize Agent and mock LLM response
     agent = SelfImprovementAgent(memory_dir)
-    agent.client.generate = MagicMock(return_value="""
+    mock_get_generate = MagicMock(return_value="""
     <compacted_lessons>
       <lesson>
         <title>Merged Rule</title>
@@ -71,6 +71,7 @@ def test_compact_lessons_integration(tmpdir):
       </lesson>
     </compacted_lessons>
     """)
+    monkeypatch.setattr("maria.self_improvement.getGenerate", mock_get_generate)
     
     # Run compaction
     success = agent.compact_lessons([

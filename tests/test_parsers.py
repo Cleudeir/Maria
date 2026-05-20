@@ -1,11 +1,11 @@
-from maria.agent import parse_agent_response, sanitize_agent_response
+from maria.agent import parse_agent_response
 from maria.self_improvement import parse_self_improvement_response
 
 
 def test_parse_agent_response():
     # 1. Standard write_file
     response = """
-    <thought>I need to write a python file to compute factorial.</thought>
+    I need to write a python file to compute factorial.
     <tool name="write_file">
       <path>math_utils.py</path>
       <content>
@@ -23,9 +23,28 @@ def factorial(n):
     # Verify that the < and > signs inside the python code are preserved and not mangled by XML parsing
     assert "if n < 2:" in args["content"]
 
+    # 1b. Standard write_file with plain thought
+    response_plain = """
+    I need to write a python file to compute factorial.
+    <tool name="write_file">
+      <path>math_utils.py</path>
+      <content>
+def factorial(n):
+    if n < 2:
+        return 1
+    return n * factorial(n - 1)
+      </content>
+    </tool>
+    """
+    thought, tool, args = parse_agent_response(response_plain)
+    assert thought == "I need to write a python file to compute factorial."
+    assert tool == "write_file"
+    assert args["path"] == "math_utils.py"
+    assert "if n < 2:" in args["content"]
+
     # 2. Run command
     response2 = """
-    <thought>Let's run tests</thought>
+    Let's run tests
     <tool name="run_command">
       <command>pytest tests/</command>
     </tool>
@@ -37,7 +56,7 @@ def factorial(n):
 
     # 3. Finish task
     response3 = """
-    <THOUGHT>All tests passed.</THOUGHT>
+    All tests passed.
     <TOOL name="finish_task">
       <summary>Calculator module created.</summary>
     </TOOL>
@@ -49,7 +68,7 @@ def factorial(n):
 
     # 4. Closing tag typo / missing closing tag
     response4 = """
-    <thought>Let's write a file.</thought>
+    Let's write a file.
     <tool name="write_file">
       <path>test_game.py</content>
       <content>print("game")</content>
@@ -69,14 +88,6 @@ def test_is_llm_response():
     assert is_llm_response('<tool name="read_file">')
     assert not is_llm_response("Just plain text without XML tags.")
     assert not is_llm_response("")
-
-
-def test_sanitize_agent_response():
-    response = "<think>Pensamos</think><thought>Action</thought><tool name='finish_task'></tool>"
-    sanitized = sanitize_agent_response(response)
-    assert "</think>" not in sanitized
-    assert "pensamos" not in sanitized.lower()
-    assert "<thought>Action</thought>" in sanitized
 
 
 def test_parse_self_improvement_response():

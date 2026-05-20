@@ -23,6 +23,7 @@ from maria.memory import (
     save_lessons,
 )
 from maria.self_improvement import SelfImprovementAgent
+from maria.ollama import getGenerate, get_last_usage, format_messages_to_prompt
 
 # Set server environment variable for bypassing security console prompts
 os.environ["MARIA_SERVER"] = "1"
@@ -195,9 +196,9 @@ def build_step_prompt(state):
     prompt_lines.extend(
         [
             "Respond using the exact format below:",
-            "<thought>Your reasoning here</thought>",
+            "<think>Your reasoning here</think>",
             "<tool name='tool_name'>JSON arguments here</tool>",
-            "If no tool call is needed, return only <thought>...</thought> and omit the tool tag or use an empty tool name.",
+            "If no tool call is needed, return only <think>...</think> and omit the tool tag or use an empty tool name.",
         ]
     )
 
@@ -337,12 +338,14 @@ def run_agent_step_sync(
     if state["stage"] == "improving_prompt":
         try:
             improved = agent.improve_prompt(state["task"], lessons)
+            usage = getattr(agent.client, "last_usage", {})
             state["improved_prompt"] = improved
             state["execution_log"].append(
                 {
                     "step": state["step"],
                     "role": "system",
                     "content": f"💡 Stage 1 Complete: Improved Prompt:\n{improved}",
+                    "ollama_usage": usage,
                 }
             )
 
@@ -364,12 +367,14 @@ def run_agent_step_sync(
     elif state["stage"] == "generating_plan":
         try:
             plan = agent.generate_plan(state["improved_prompt"])
+            usage = getattr(agent.client, "last_usage", {})
             state["plan"] = plan
             state["execution_log"].append(
                 {
                     "step": state["step"],
                     "role": "system",
                     "content": f"📋 Stage 2 Complete: Complete Plan:\n{plan}",
+                    "ollama_usage": usage,
                 }
             )
 
@@ -401,6 +406,7 @@ def run_agent_step_sync(
     elif state["stage"] == "creating_steps":
         try:
             steps = agent.create_steps(state["plan"])
+            usage = getattr(agent.client, "last_usage", {})
             state["steps"] = steps
             steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
             state["execution_log"].append(
@@ -408,6 +414,7 @@ def run_agent_step_sync(
                     "step": state["step"],
                     "role": "system",
                     "content": f"🛠️ Stage 3 Complete: Execution Steps:\n{steps_str}",
+                    "ollama_usage": usage,
                 }
             )
 
@@ -550,11 +557,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
     elif state["stage"] == "verifying":
         try:
             verdict, report = agent.verify_execution(state["plan"], state["steps"])
+            usage = getattr(agent.client, "last_usage", {})
             state["execution_log"].append(
                 {
                     "step": state["step"],
                     "role": "system",
                     "content": f"🔍 Stage 5 Complete: Final Verification Report:\n{report}\n\nVerdict: {verdict}",
+                    "ollama_usage": usage,
                 }
             )
 
@@ -603,7 +612,9 @@ def run_llm_for_tool(state, client):
     """
     state["step"] += 1
     try:
-        response_text = client.chat(state["messages"], temperature=0.1, stream=True)
+        system_text, user_text = format_messages_to_prompt(state["messages"])
+        response_text = getGenerate(system_text, user_text)
+        usage = get_last_usage()
     except Exception as e:
         err_msg = f"LLM error: {e}"
         state["errors_encountered"].append(
@@ -618,10 +629,8 @@ def run_llm_for_tool(state, client):
         "step": state["step"],
         "role": "assistant",
         "content": response_text,
+        "ollama_usage": usage,
     }
-    response_usage = getattr(client, "last_usage", None)
-    if response_usage:
-        assistant_entry["ollama_usage"] = response_usage
     state["execution_log"].append(assistant_entry)
 
     thought, tool_name, args = parse_agent_response(response_text)
@@ -633,7 +642,7 @@ def run_llm_for_tool(state, client):
             state["status"] = "awaiting_intervention"
             return state
 
-        err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
+        err_msg = "Format error: You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
         state["errors_encountered"].append(
             {"step": state["step"], "type": "format_error", "message": err_msg}
         )
@@ -1206,8 +1215,9 @@ def resume_incomplete_tasks():
                         state["status"] = "running"
                         save_task_state(task_id, state)
 
+                        stop_event = get_task_stop_event(task_id)
                         thread = threading.Thread(
-                            target=background_execution_loop, args=(task_id,)
+                            target=background_execution_loop, args=(task_id, stop_event)
                         )
                         thread.daemon = True
                         thread.start()

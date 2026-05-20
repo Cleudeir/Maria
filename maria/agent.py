@@ -2,34 +2,26 @@ import os
 import re
 from typing import List, Dict, Tuple, Any
 from maria.llm import OllamaClient
+from maria.ollama import getGenerate, format_messages_to_prompt
 from maria.memory import load_system_prompt, load_lessons, add_task_history
 from maria.tools import ToolExecutor
-
-
-def sanitize_agent_response(response_text: str) -> str:
-    """Normalize the agent response by stripping unwanted think tags and Portuguese artifacts."""
-    if not isinstance(response_text, str):
-        return ""
-    sanitized = re.sub(r"</?think\s*>", "", response_text, flags=re.IGNORECASE)
-    sanitized = re.sub(r"\b[pP]ensamos\b", "", sanitized)
-    sanitized = re.sub(r"\s{2,}", " ", sanitized)
-    return sanitized.strip()
 
 
 def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     """
     Parses agent response using regex to extract thoughts and XML-like tool calls.
     """
-    response_text = sanitize_agent_response(response_text)
-    # Find thought - match until closing tag, or next tag, or end of response
-    thought_match = re.search(
-        r"<thought>(.*?)</thought>", response_text, re.DOTALL | re.IGNORECASE
-    )
-    if not thought_match:
-        thought_match = re.search(
-            r"<thought>(.*?)(?:<tool|\Z)", response_text, re.DOTALL | re.IGNORECASE
+    if not isinstance(response_text, str):
+        return "", "", {}
+
+    # Extract all text before <tool as the thought if a tool is present
+    if re.search(r"<tool\s+name=", response_text, re.IGNORECASE):
+        pre_tool_match = re.search(
+            r"^(.*?)(?:<tool|\Z)", response_text, re.DOTALL | re.IGNORECASE
         )
-    thought = thought_match.group(1).strip() if thought_match else ""
+        thought = pre_tool_match.group(1).strip() if pre_tool_match else ""
+    else:
+        thought = ""
 
     # Find tool call name
     tool_match = re.search(
@@ -72,8 +64,6 @@ def is_llm_response(response_text: str) -> bool:
     """Detect whether a loop response looks like an LLM assistant response."""
     if not isinstance(response_text, str) or not response_text.strip():
         return False
-    if re.search(r"<thought\b", response_text, re.IGNORECASE):
-        return True
     if re.search(r"<tool\s+name=", response_text, re.IGNORECASE):
         return True
     return False
@@ -95,24 +85,16 @@ class MariaAgent:
         self.errors_encountered = []
 
     def improve_prompt(self, task: str, lessons: List[Dict[str, str]]) -> str:
-        prompt = f"""You are an expert prompt engineer. Your job is to improve the user's prompt to be extremely clear, detailed, precise, and structured. 
-Ensure all requirements, edge cases, and testing strategies are explicit. Keep the original intent intact.
+        prompt = f"""Improve the following user task prompt to be clear, concise, and structured. Keep the original intent intact.
 
 Original User Task:
----
 {task}
----
 
-Response Format:
-Provide only the improved task prompt. Do not add any preamble (like "Here is the improved prompt:") or XML tags. Just the refined, detailed prompt.
+Provide only the improved prompt. No preamble, no XML tags.
 """
-        response = self.client.chat(
-            [
-                {"role": "system", "content": "You are a prompt optimizer assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            stream=True,
+        response = getGenerate(
+            system_text="You are a prompt optimizer assistant.",
+            user_text=prompt,
         )
         return response.strip()
 
@@ -134,16 +116,9 @@ Detailed Task Description:
 Response Format:
 Provide the complete plan in clear Markdown. No conversational preamble.
 """
-        response = self.client.chat(
-            [
-                {
-                    "role": "system",
-                    "content": "You are a software architect assistant.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            stream=True,
+        response = getGenerate(
+            system_text="You are a software architect assistant.",
+            user_text=prompt,
         )
         return response.strip()
 
@@ -161,18 +136,16 @@ Implementation Plan:
 Response Format:
 Provide ONLY the numbered list of steps (e.g. "1. Step description\n2. Step description\n..."). No preamble, no other text.
 """
-        response = self.client.chat(
-            [
-                {"role": "system", "content": "You are a project manager assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.1,
-            stream=True,
+        response = getGenerate(
+            system_text="You are a project manager assistant.",
+            user_text=prompt,
         )
+
+        response_cleaned = response.strip()
 
         # Parse numbered list
         steps = []
-        for line in response.strip().splitlines():
+        for line in response_cleaned.splitlines():
             line = line.strip()
             # Match lines starting with a number followed by a dot or parenthesis, e.g., 1. or 1)
             match = re.match(r"^\d+[\.\)]\s*(.*)", line)
@@ -240,16 +213,9 @@ Output your response using these XML tags:
 <analysis>Your detailed analysis and auditing findings</analysis>
 <verdict>SUCCESS or FAILED</verdict>
 """
-        response = self.client.chat(
-            [
-                {
-                    "role": "system",
-                    "content": "You are a code verification quality control assistant.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.1,
-            stream=True,
+        response = getGenerate(
+            system_text="You are a code verification quality control assistant.",
+            user_text=prompt,
         )
 
         analysis_match = re.search(
@@ -414,8 +380,10 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 print(f"\n--- Step {step_num} - Turn {step_turns} ---")
 
                 try:
-                    response_text = self.client.chat(
-                        step_messages, temperature=0.1, stream=True
+                    system_text, user_text = format_messages_to_prompt(step_messages)
+                    response_text = getGenerate(
+                        system_text=system_text,
+                        user_text=user_text,
                     )
                 except Exception as e:
                     err_msg = f"LLM error: {e}"
@@ -444,7 +412,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     print(
                         "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                     )
-                    err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
+                    err_msg = "Format error: You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
                     self.errors_encountered.append(
                         {"step": step_num, "type": "format_error", "message": err_msg}
                     )

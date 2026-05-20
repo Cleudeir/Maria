@@ -1,6 +1,7 @@
 import re
 from typing import List, Dict, Any
 from maria.llm import OllamaClient
+from maria.ollama import getGenerate
 from maria.memory import load_system_prompt, load_lessons, add_lesson, save_system_prompt, save_lessons
 
 def parse_self_improvement_response(response_text: str):
@@ -155,7 +156,10 @@ Write the updated dynamic guidelines or the complete system prompt here. Focus o
 
         try:
             # Query the model for self-improvement
-            response_text = self.client.generate(meta_prompt, temperature=0.2)
+            response_text = getGenerate(
+                system_text=None,
+                user_text=meta_prompt,
+            )
             
             analysis, new_lessons, improved_prompt = parse_self_improvement_response(response_text)
             
@@ -287,7 +291,10 @@ Output your response using the following XML format:
 </compacted_lessons>
 """
         try:
-            response_text = self.client.generate(compact_prompt, temperature=0.4)
+            response_text = getGenerate(
+                system_text=None,
+                user_text=compact_prompt,
+            )
             compacted_lessons = parse_compacted_lessons_response(response_text)
             
             if compacted_lessons:

@@ -282,16 +282,19 @@ function formatOllamaUsage(usage) {
   if (!usage || typeof usage !== "object") return "";
   const parts = [];
   if (Number.isInteger(usage.prompt_tokens)) {
-    parts.push(`prompt ${usage.prompt_tokens}`);
+    parts.push(`Prompt: ${usage.prompt_tokens}`);
   }
   if (Number.isInteger(usage.completion_tokens)) {
-    parts.push(`completion ${usage.completion_tokens}`);
+    parts.push(`Completion: ${usage.completion_tokens}`);
   }
   if (Number.isInteger(usage.total_tokens)) {
-    parts.push(`total ${usage.total_tokens}`);
+    parts.push(`Total: ${usage.total_tokens}`);
+  }
+  if (usage.tokens_per_second) {
+    parts.push(`Speed: ${usage.tokens_per_second} t/s`);
   }
   if (!parts.length && usage.tokens && Number.isInteger(usage.tokens)) {
-    parts.push(`total ${usage.tokens}`);
+    parts.push(`Total: ${usage.tokens}`);
   }
   return parts.length ? `Ollama: ${parts.join(" | ")}` : "";
 }

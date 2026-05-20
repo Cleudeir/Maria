@@ -148,18 +148,23 @@ def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
     }
 
     class DummyClient:
-        def __init__(self, response_text):
-            self.chat = MagicMock(return_value=response_text)
+        def __init__(self):
+            self.base_url = "http://localhost:11434"
+            self.model = "qwen3.5:4b"
 
-    client = DummyClient("No valid tool output")
+    client = DummyClient()
+
+    mock_get_generate = MagicMock(return_value="No valid tool output")
+    monkeypatch.setattr(server, "getGenerate", mock_get_generate)
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "awaiting_intervention"
     assert new_state["proposed_tool"] is None
     assert any(err["type"] == "format_error" for err in new_state["errors_encountered"])
 
-    client = DummyClient("<thought>Thinking through the next step.</thought>")
+    mock_get_generate.return_value = "<think>Thinking through the next step.</think>"
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "awaiting_intervention"
-    assert new_state["proposed_tool"]["name"] is None
+    assert new_state["proposed_tool"] is None
+    assert any(err["type"] == "format_error" for err in new_state["errors_encountered"])
