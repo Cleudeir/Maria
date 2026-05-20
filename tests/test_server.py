@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 from unittest.mock import MagicMock
 
 import server
@@ -126,7 +127,9 @@ def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path
             "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
-    def fake_run_agent_step_sync(task_id_arg, action="approve", modified_tool=None, user_prompt=None):
+    def fake_run_agent_step_sync(
+        task_id_arg, action="approve", modified_tool=None, user_prompt=None
+    ):
         current = server.load_task_state(task_id_arg)
         current["status"] = "completed"
         server.save_task_state(task_id_arg, current)
@@ -134,7 +137,7 @@ def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path
 
     monkeypatch.setattr(server, "supervise_proposed_tool", fake_supervise_proposed_tool)
     monkeypatch.setattr(server, "run_agent_step_sync", fake_run_agent_step_sync)
-    monkeypatch.setattr(server, "time.sleep", lambda _: None)
+    monkeypatch.setattr(server.time, "sleep", lambda _: None)
 
     server.background_execution_loop(task_id)
     new_state = server.load_task_state(task_id)
@@ -255,7 +258,10 @@ def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
     client = DummyClient()
 
     # First returns invalid, second returns valid list_dir tool call
-    responses = ["Invalid output first", "<think>Second attempt reasoning</think><tool name=\"list_dir\"><path>.</path></tool>"]
+    responses = [
+        "Invalid output first",
+        '<think>Second attempt reasoning</think><tool name="list_dir"><path>.</path></tool>',
+    ]
     call_idx = 0
 
     def mock_get_generate(system, user):
@@ -268,7 +274,11 @@ def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "running"
-    assert new_state["proposed_tool"] == {"name": "list_dir", "args": {"path": "."}, "thought": "<think>Second attempt reasoning</think>"}
+    assert new_state["proposed_tool"] == {
+        "name": "list_dir",
+        "args": {"path": "."},
+        "thought": "<think>Second attempt reasoning</think>",
+    }
     assert len(new_state["errors_encountered"]) == 1
     assert new_state["errors_encountered"][0]["type"] == "format_error"
     assert call_idx == 2
@@ -306,11 +316,15 @@ def test_create_task_with_model_think(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
 
     client = server.app.test_client()
-    
+
     # 1. Create a task with model_think = False
     response = client.post(
         "/api/tasks",
-        json={"task": "Test task with think disabled", "mode": "step", "model_think": False}
+        json={
+            "task": "Test task with think disabled",
+            "mode": "step",
+            "model_think": False,
+        },
     )
     assert response.status_code == 200
     data = response.get_json()
@@ -322,7 +336,11 @@ def test_create_task_with_model_think(monkeypatch, tmp_path):
     # 2. Create a task with model_think = True
     response = client.post(
         "/api/tasks",
-        json={"task": "Test task with think enabled", "mode": "step", "model_think": True}
+        json={
+            "task": "Test task with think enabled",
+            "mode": "step",
+            "model_think": True,
+        },
     )
     assert response.status_code == 200
     data = response.get_json()
@@ -330,8 +348,7 @@ def test_create_task_with_model_think(monkeypatch, tmp_path):
 
     # 3. Create a task without model_think (should default to True)
     response = client.post(
-        "/api/tasks",
-        json={"task": "Test task with default think", "mode": "step"}
+        "/api/tasks", json={"task": "Test task with default think", "mode": "step"}
     )
     assert response.status_code == 200
     data = response.get_json()

@@ -114,5 +114,5 @@ def supervise_proposed_tool(
         "new_step_description": args.get("new_step_description", ""),
         "thought": thought,
         "raw_response": response_text,
-        "reviewed_at": datetime.utcnow().isoformat(),
+        "reviewed_at": datetime.now().isoformat(),
     }

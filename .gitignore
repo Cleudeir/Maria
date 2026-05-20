@@ -1,1 +1,10 @@
 /workspace/*
+*.pyc
+**/__pycache__
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/

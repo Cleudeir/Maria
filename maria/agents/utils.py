@@ -18,6 +18,14 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     else:
         thought = ""
 
+    if thought:
+        thought = re.sub(
+            r"^<(think|thought)>(.*)</(think|thought)>$",
+            r"\2",
+            thought,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
     # Find the tool tag
     tool_tag_match = re.search(r"<tool\b[^>]*>", response_text, re.IGNORECASE)
     if not tool_tag_match:
@@ -81,6 +89,23 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     # Extract summary if finish_task
     if tool_name == "finish_task":
         args["summary"] = get_param("summary")
+
+    # Extract additional supervision or generic arguments
+    for param_name in (
+        "reason",
+        "new_step_description",
+        "path",
+        "query",
+        "target",
+        "replacement",
+        "content",
+        "command",
+        "summary",
+    ):
+        if param_name not in args:
+            value = get_param(param_name, is_line_matching=(param_name in ("path", "command")))
+            if value:
+                args[param_name] = value
 
     return thought, tool_name, args
 
