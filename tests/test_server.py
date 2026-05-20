@@ -77,6 +77,73 @@ def test_resume_auto_rejects_non_auto_mode(monkeypatch, tmp_path):
     assert data["error"] == "Task is not in auto mode"
 
 
+def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+    task_id = "task_supervise"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+
+    state = {
+        "task_id": task_id,
+        "task": "Build a safe agent",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": "auto",
+        "status": "running",
+        "stage": "executing_steps",
+        "step": 0,
+        "max_steps": 20,
+        "ollama_url": server.OLLAMA_URL,
+        "messages": [],
+        "execution_log": [],
+        "errors_encountered": [],
+        "proposed_tool": {
+            "name": "write_file",
+            "args": {"path": "danger.py", "content": "print('unsafe')"},
+            "thought": "I will write the file next.",
+        },
+        "last_raw_response": None,
+        "step_summaries": [],
+        "last_tool_result": None,
+        "last_user_intervention": None,
+        "plan": "Create a safer implementation.",
+        "steps": ["Write a dangerous file"],
+        "current_step_idx": 0,
+        "completed_step_summaries": [],
+        "supervision_status": "idle",
+        "supervision_reason": None,
+        "supervision_last_review": None,
+        "supervision_log": [],
+    }
+    server.save_task_state(task_id, state)
+
+    def fake_supervise_proposed_tool(*args, **kwargs):
+        return {
+            "action": "reroute",
+            "reason": "The current step is unsafe and should be rewritten.",
+            "new_step_description": "Create a secure application structure instead.",
+            "thought": "The proposed action is misaligned with the plan.",
+            "raw_response": "",
+            "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+    def fake_run_agent_step_sync(task_id_arg, action="approve", modified_tool=None, user_prompt=None):
+        current = server.load_task_state(task_id_arg)
+        current["status"] = "completed"
+        server.save_task_state(task_id_arg, current)
+        return current
+
+    monkeypatch.setattr(server, "supervise_proposed_tool", fake_supervise_proposed_tool)
+    monkeypatch.setattr(server, "run_agent_step_sync", fake_run_agent_step_sync)
+    monkeypatch.setattr(server, "time.sleep", lambda _: None)
+
+    server.background_execution_loop(task_id)
+    new_state = server.load_task_state(task_id)
+
+    assert new_state["supervision_status"] == "reroute"
+    assert new_state["steps"][0] == "Create a secure application structure instead."
+    assert new_state["status"] == "completed"
+
+
 def test_delete_task_stops_background_thread_and_cleans_up(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setattr(server, "active_threads", {})
@@ -248,6 +315,9 @@ def test_create_task_with_model_think(monkeypatch, tmp_path):
     assert response.status_code == 200
     data = response.get_json()
     assert data["model_think"] is False
+
+    task_id = data["task_id"]
+    assert (tmp_path / task_id / "output").is_dir()
 
     # 2. Create a task with model_think = True
     response = client.post(

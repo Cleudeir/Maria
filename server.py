@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from maria.llm import OllamaClient
 from maria.agent import parse_agent_response, MariaAgent
+from maria.agents.supervise_execution import supervise_proposed_tool
 from maria.security import is_command_critical
 from maria.tools import ToolExecutor
 from maria.memory import (
@@ -256,6 +257,14 @@ def run_agent_step_sync(
         state["last_tool_result"] = None
     if "last_user_intervention" not in state:
         state["last_user_intervention"] = None
+    if "supervision_status" not in state:
+        state["supervision_status"] = "idle"
+    if "supervision_reason" not in state:
+        state["supervision_reason"] = None
+    if "supervision_last_review" not in state:
+        state["supervision_last_review"] = None
+    if "supervision_log" not in state:
+        state["supervision_log"] = []
 
     if state["status"] not in (
         "running",
@@ -736,10 +745,61 @@ def background_execution_loop(task_id):
                     state["status"] = "awaiting_intervention"
                     save_task_state(task_id, state)
                     break
-            if proposed_tool.get("name") is None:
+
+            supervision = supervise_proposed_tool(
+                task=state.get("task", ""),
+                stage=state.get("stage", ""),
+                plan=state.get("plan", ""),
+                steps=state.get("steps", []),
+                current_step_idx=state.get("current_step_idx", 0),
+                proposed_tool=proposed_tool,
+                completed_summaries=state.get("completed_step_summaries", []),
+                last_tool_result=state.get("last_tool_result", ""),
+                last_user_intervention=state.get("last_user_intervention", ""),
+            )
+
+            state["supervision_status"] = supervision["action"]
+            state["supervision_reason"] = supervision["reason"]
+            state["supervision_last_review"] = supervision["reviewed_at"]
+            state["supervision_log"].append(
+                {
+                    "timestamp": supervision["reviewed_at"],
+                    "action": supervision["action"],
+                    "reason": supervision["reason"],
+                    "proposal": proposed_tool,
+                    "thought": supervision["thought"],
+                }
+            )
+            save_task_state(task_id, state)
+
+            if supervision["action"] == "approve":
+                state = run_agent_step_sync(task_id, action="approve")
+            elif supervision["action"] == "reroute":
+                if state.get("stage") == "executing_steps":
+                    curr_idx = state.get("current_step_idx", 0)
+                    new_desc = supervision.get("new_step_description", "").strip()
+                    if new_desc and 0 <= curr_idx < len(state.get("steps", [])):
+                        state["steps"][curr_idx] = new_desc
+                        state["plan"] = (
+                            state.get("plan", "")
+                            + f"\n\n[Supervisor rerouted step {curr_idx + 1}: {new_desc}]"
+                        )
+                    state["messages"] = []
+                    state["proposed_tool"] = None
+                    state["status"] = "running"
+                    save_task_state(task_id, state)
+                    continue
+                else:
+                    state["status"] = "awaiting_intervention"
+                    save_task_state(task_id, state)
+                    break
+            else:
                 state["status"] = "awaiting_intervention"
+                state["proposed_tool"] = None
                 save_task_state(task_id, state)
                 break
+
+        else:
             state = run_agent_step_sync(task_id, action="approve")
 
         if not state or state["status"] in (
@@ -865,12 +925,14 @@ def create_task():
 
     max_steps = int(data.get("max_steps", 20))
     mode = data.get("mode", "step")  # 'step' or 'auto'
+    model_think = bool(data.get("model_think", True))
 
-    # 1. Create isolated directory
+    # 1. Create isolated directory and output directory
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     task_id = f"task_{timestamp}"
     task_path = get_task_path(task_id)
     os.makedirs(task_path, exist_ok=True)
+    os.makedirs(os.path.join(task_path, "output"), exist_ok=True)
 
     # 2. Write legacy task info HTML (keep standard compatibility)
     created_time_str = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -902,6 +964,7 @@ def create_task():
         "stage": "improving_prompt",
         "step": 0,
         "max_steps": max_steps,
+        "model_think": model_think,
         "ollama_url": OLLAMA_URL,
         "messages": [],
         "execution_log": [
@@ -926,6 +989,10 @@ def create_task():
         "steps": [],
         "current_step_idx": 0,
         "completed_step_summaries": [],
+        "supervision_status": "idle",
+        "supervision_reason": None,
+        "supervision_last_review": None,
+        "supervision_log": [],
     }
 
     save_task_state(task_id, state)
