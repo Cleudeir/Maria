@@ -115,6 +115,8 @@ class OllamaProvider(LLMProvider):
     ) -> tuple[Optional[str], str]:
         return shared_format(messages)
 
+    _MAX_LOOP_RETRIES = 3
+
     def generate(
         self,
         system_text: Optional[str],
@@ -124,91 +126,124 @@ class OllamaProvider(LLMProvider):
         self._set_last_usage({})
 
         url = f"{self.base_url}/api/generate"
+        path_thinker_file = os.path.join(os.path.dirname(__file__), "_thinking.log")
 
-        payload = {
-            "model": self.model,
-            "prompt": user_text,
-            "stream": True,
-            "think": self.model_think,
-            "options": {
-                "temperature": self._temperature,
-                "num_ctx": 8192,
-            },
-        }
-        if system_text:
-            payload["system"] = system_text
-        if self._stop:
-            payload["options"]["stop"] = self._stop
+        for attempt in range(self._MAX_LOOP_RETRIES):
+            # Fixed temperatures per attempt: 0.5 → 0.7 → 0.9
+            retry_temperature = [0.5, 0.7, 0.9][attempt]
 
-        try:
-            response = requests.post(
-                url,
-                json=payload,
-                headers=self.headers,
-                timeout=3600,
-                stream=True,
-            )
-            response.raise_for_status()
+            payload = {
+                "model": self.model,
+                "prompt": user_text,
+                "stream": True,
+                "think": self.model_think,
+                "options": {
+                    "temperature": retry_temperature,
+                    "num_ctx": 8192,
+                },
+            }
+            if system_text:
+                payload["system"] = system_text
+            if self._stop:
+                payload["options"]["stop"] = self._stop
 
-            thinking_output = ""
-            response_output = ""
-            last_event = None
-            loop_check_counter = 0
-            thinking_loop_counter = 0
+            if attempt > 0:
+                print(
+                    f"[Ollama] Retrying step after loop detection "
+                    f"(attempt {attempt + 1}/{self._MAX_LOOP_RETRIES}, temp={retry_temperature})",
+                    flush=True,
+                )
 
-            for raw_line in response.iter_lines(decode_unicode=True):
-                if not raw_line:
-                    continue
-                try:
-                    event = json.loads(raw_line)
-                    last_event = event
-                    if event.get("thinking"):
-                        thinking_output += event["thinking"]
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    headers=self.headers,
+                    timeout=3600,
+                    stream=True,
+                )
+                response.raise_for_status()
 
-                        thinking_loop_counter += 1
-                        path_thinker_file = os.path.join(os.path.dirname(__file__), "_thinking.log")
-                        #clear this file
-                        with open(path_thinker_file, "w") as f:
-                            f.write("")
-                        if thinking_loop_counter % 10 == 0 and len(thinking_output) > 200:
-                            loop_pattern = detect_loop(thinking_output)
-                            if loop_pattern:
-                                print(f"[Ollama] Thinking loop detected: {loop_pattern}")
-                                with open(path_thinker_file, "a") as f:
-                                    f.write(f"\n\n[THINKING LOOP DETECTED - {loop_pattern}]\n")
-                                if not response_output.strip():
-                                    response_output = "[THINKING LOOP DETECTED - forcing response generation]"
-                                break
+                thinking_output = ""
+                response_output = ""
+                last_event = None
+                loop_check_counter = 0
+                thinking_loop_counter = 0
+                loop_detected = False
 
-                        print(f"[Ollama] Thought: {len(thinking_output)} characters")
-                        with open("maria_thinking.log", "a") as f:
-                            f.write(event["thinking"])
-                    if isinstance(event.get("response"), str):
-                        response_output += event["response"]
-                        loop_check_counter += 1
-                        if loop_check_counter % 5 == 0 and len(response_output) > 100:
-                            loop_pattern = detect_loop(response_output)
-                            if loop_pattern:
-                                print(f"[Ollama] Response loop detected: {loop_pattern}")
-                                response_output += "\n\n[LOOP DETECTED - generation stopped to prevent explosion]"
-                                if progress_callback:
-                                    progress_callback(response_output)
-                                break
-                        if progress_callback:
-                            progress_callback(strip_thinking_process(response_output))
-                    if event.get("done") is True:
-                        break
-                except ValueError:
-                    continue
+                for raw_line in response.iter_lines(decode_unicode=True):
+                    if not raw_line:
+                        continue
+                    try:
+                        event = json.loads(raw_line)
+                        last_event = event
 
-            if last_event:
-                self._set_last_usage(_parse_metrics(last_event))
-            return strip_thinking_process(response_output)
+                        if event.get("thinking"):
+                            thinking_output += event["thinking"]
+                            thinking_loop_counter += 1
 
-        except requests.exceptions.ConnectionError:
-            raise RuntimeError("Ollama not in use. Make sure ollama is running.")
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Ollama request failed: {e}")
+                            with open(path_thinker_file, "w") as f:
+                                f.write("")
+
+                            if thinking_loop_counter % 10 == 0 and len(thinking_output) > 200:
+                                loop_pattern = detect_loop(thinking_output)
+                                if loop_pattern:
+                                    print(
+                                        f"[Ollama] Thinking loop detected "
+                                        f"(attempt {attempt + 1}): {loop_pattern}",
+                                        flush=True,
+                                    )
+                                    with open(path_thinker_file, "a") as f:
+                                        f.write(f"\n\n[THINKING LOOP DETECTED - {loop_pattern}]\n")
+                                    loop_detected = True
+                                    break  # abort streaming → retry full request
+
+                            print(f"[Ollama] Thought: {len(thinking_output)} characters")
+                            with open("maria_thinking.log", "a") as f:
+                                f.write(event["thinking"])
+
+                        if isinstance(event.get("response"), str):
+                            response_output += event["response"]
+                            loop_check_counter += 1
+                            if loop_check_counter % 5 == 0 and len(response_output) > 100:
+                                loop_pattern = detect_loop(response_output)
+                                if loop_pattern:
+                                    print(
+                                        f"[Ollama] Response loop detected "
+                                        f"(attempt {attempt + 1}): {loop_pattern}",
+                                        flush=True,
+                                    )
+                                    loop_detected = True
+                                    break  # abort streaming → retry full request
+                            if progress_callback:
+                                progress_callback(strip_thinking_process(response_output))
+
+                        if event.get("done") is True:
+                            break
+
+                    except ValueError:
+                        continue
+
+                if last_event:
+                    self._set_last_usage(_parse_metrics(last_event))
+
+                if not loop_detected:
+                    # Clean generation — return immediately
+                    return strip_thinking_process(response_output)
+
+                # Loop detected — discard response and retry
+                print("[Ollama] Discarding looped response, retrying step...", flush=True)
+
+            except requests.exceptions.ConnectionError:
+                raise RuntimeError("Ollama not in use. Make sure ollama is running.")
+            except requests.exceptions.RequestException as e:
+                raise RuntimeError(f"Ollama request failed: {e}")
+
+        # All retries exhausted
+        raise LoopDetectedError(
+            f"Ollama stuck in a loop after {self._MAX_LOOP_RETRIES} attempts. "
+            "The model cannot produce a non-repetitive response for this input."
+        )
 
     def chat(
         self,
