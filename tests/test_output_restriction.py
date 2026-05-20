@@ -12,12 +12,13 @@ def test_tool_executor_write_file_restriction(tmp_path):
 
     executor = ToolExecutor(str(workspace))
 
-    # Writing directly to root (outside output/) should be blocked
+    # Writing to a root-relative path is now saved under output/
     res = executor.write_file("test.txt", "hello")
-    assert "Error: Access Denied" in res
-    assert not (workspace / "test.txt").exists()
+    assert "Success" in res
+    assert (workspace / "output" / "test.txt").exists()
+    assert (workspace / "output" / "test.txt").read_text() == "hello"
 
-    # Writing to output/ should be allowed
+    # Writing to output/ should still be allowed
     res2 = executor.write_file("output/test.txt", "hello output")
     assert "Success" in res2
     assert (workspace / "output" / "test.txt").exists()
@@ -90,11 +91,44 @@ def test_new_tools_restrictions(tmp_path):
     assert "output/test.txt:1: hello python world" in res_grep
 
     # Test edit_file inside output/ (should be allowed)
-    res_edit = executor.edit_file("output/test.txt", "hello python world", "hello beautiful python world")
+    res_edit = executor.edit_file(
+        "output/test.txt", "hello python world", "hello beautiful python world"
+    )
     assert "Success" in res_edit
-    assert (output_dir / "test.txt").read_text() == "hello beautiful python world\nline 2 here"
+    assert (
+        output_dir / "test.txt"
+    ).read_text() == "hello beautiful python world\nline 2 here"
 
     # Test edit_file outside output/ (should be blocked)
-    res_edit_bad = executor.edit_file("outside.txt", "hello python outside", "should not change")
+    res_edit_bad = executor.edit_file(
+        "outside.txt", "hello python outside", "should not change"
+    )
     assert "Error: Access Denied" in res_edit_bad
-    assert (workspace / "outside.txt").read_text() == "hello python outside\nline 2 here"
+    assert (
+        workspace / "outside.txt"
+    ).read_text() == "hello python outside\nline 2 here"
+
+
+def test_list_dir_shows_output_directory_only(tmp_path):
+    workspace = tmp_path / "task_789"
+    workspace.mkdir()
+    output_dir = workspace / "output"
+    output_dir.mkdir()
+    (output_dir / "test.txt").write_text("hello output")
+    (output_dir / "sub").mkdir()
+    (output_dir / "sub" / "nested.txt").write_text("nested")
+    (workspace / "outside.txt").write_text("should not be listed")
+
+    executor = ToolExecutor(str(workspace))
+
+    res = executor.list_dir(".")
+    assert "[FILE] test.txt" in res
+    assert "[DIR] sub" in res
+    assert "outside.txt" not in res
+
+    res_sub = executor.list_dir("output/sub")
+    assert "[FILE] nested.txt" in res_sub
+    assert "outside.txt" not in res_sub
+
+    res_bad = executor.list_dir("../")
+    assert "Error: Access Denied" in res_bad

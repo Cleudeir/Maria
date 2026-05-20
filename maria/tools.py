@@ -62,13 +62,21 @@ class ToolExecutor:
 
     def list_dir(self, path: str = ".") -> str:
         """
-        Lists files and subdirectories in path (recursively) relative to workspace.
+        Lists files and subdirectories in the workspace output directory.
         """
-        if not is_path_safe(self.workspace_dir, path):
-            return "Error: Access Denied. Path is outside workspace."
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        if path in (".", "", "output"):
+            target_dir = output_dir
+        else:
+            if path.startswith("output" + os.sep):
+                path = path[len("output" + os.sep) :]
+            target_dir = os.path.abspath(os.path.join(output_dir, path))
 
-        target_dir = os.path.abspath(os.path.join(self.workspace_dir, path))
+        if not is_path_safe(output_dir, target_dir):
+            return "Error: Access Denied. Path is outside output directory."
         if not os.path.exists(target_dir):
+            if target_dir == output_dir:
+                return "Error: Output directory does not exist yet."
             return f"Error: Path '{path}' does not exist."
         if not os.path.isdir(target_dir):
             return f"Error: Path '{path}' is not a directory."
@@ -77,13 +85,18 @@ class ToolExecutor:
             result = []
             for root, dirs, files in os.walk(target_dir):
                 # Prune unwanted/large directories
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.venv', 'venv')]
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not d.startswith(".")
+                    and d not in ("node_modules", "__pycache__", ".venv", "venv")
+                ]
                 for d in dirs:
                     dir_path = os.path.join(root, d)
                     rel_path = os.path.relpath(dir_path, target_dir)
                     result.append(f"[DIR] {rel_path}")
                 for f in files:
-                    if f.startswith('.') or f in ("task_state.json", "task_info.html"):
+                    if f.startswith(".") or f in ("task_state.json", "task_info.html"):
                         continue
                     file_path = os.path.join(root, f)
                     rel_path = os.path.relpath(file_path, target_dir)
@@ -118,12 +131,22 @@ class ToolExecutor:
 
     def write_file(self, path: str, content: str) -> str:
         """
-        Writes content to file relative to workspace.
+        Writes content to a file in the workspace output directory.
         """
-        if not is_path_safe(self.workspace_dir, path):
+        if os.path.isabs(path):
+            return "Error: Access Denied. Absolute paths are not allowed."
+
+        if path in ("", ".", "./"):
+            return "Error: Invalid path. Please specify a file path under the output directory."
+
+        normalized_path = path
+        if not normalized_path.startswith("output" + os.sep) and normalized_path != "output":
+            normalized_path = os.path.join("output", normalized_path)
+
+        if not is_path_safe(self.workspace_dir, normalized_path):
             return "Error: Access Denied. Path is outside workspace."
 
-        target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
+        target_file = os.path.abspath(os.path.join(self.workspace_dir, normalized_path))
 
         output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
         if not is_path_safe(output_dir, target_file):
@@ -162,14 +185,24 @@ class ToolExecutor:
         try:
             for root, dirs, files in os.walk(target_dir):
                 # Exclude hidden files/dirs and some standard big folders to keep it fast
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.venv', 'venv')]
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not d.startswith(".")
+                    and d not in ("node_modules", "__pycache__", ".venv", "venv")
+                ]
                 for file in files:
-                    if file.startswith('.') or file in ('task_state.json', 'task_info.html'):
+                    if file.startswith(".") or file in (
+                        "task_state.json",
+                        "task_info.html",
+                    ):
                         continue
                     file_path = os.path.join(root, file)
                     rel_path = os.path.relpath(file_path, self.workspace_dir)
                     try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(
+                            file_path, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
                             for lineno, line in enumerate(f, 1):
                                 match = False
                                 if pattern:
@@ -179,9 +212,14 @@ class ToolExecutor:
                                     match = True
 
                                 if match:
-                                    results.append(f"{rel_path}:{lineno}: {line.strip()}")
+                                    results.append(
+                                        f"{rel_path}:{lineno}: {line.strip()}"
+                                    )
                                     if len(results) >= 200:
-                                        return "\n".join(results) + "\n(Truncated, too many results)"
+                                        return (
+                                            "\n".join(results)
+                                            + "\n(Truncated, too many results)"
+                                        )
                     except Exception:
                         continue
             return "\n".join(results) if results else "No matches found."
@@ -204,12 +242,14 @@ class ToolExecutor:
         results = []
         try:
             for root, dirs, files in os.walk(output_dir):
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
                 for file in files:
                     file_path = os.path.join(root, file)
                     rel_path = os.path.relpath(file_path, self.workspace_dir)
                     try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        with open(
+                            file_path, "r", encoding="utf-8", errors="ignore"
+                        ) as f:
                             for lineno, line in enumerate(f, 1):
                                 match = False
                                 if pattern:
@@ -219,12 +259,19 @@ class ToolExecutor:
                                     match = True
 
                                 if match:
-                                    results.append(f"{rel_path}:{lineno}: {line.strip()}")
+                                    results.append(
+                                        f"{rel_path}:{lineno}: {line.strip()}"
+                                    )
                                     if len(results) >= 200:
-                                        return "\n".join(results) + "\n(Truncated, too many results)"
+                                        return (
+                                            "\n".join(results)
+                                            + "\n(Truncated, too many results)"
+                                        )
                     except Exception:
                         continue
-            return "\n".join(results) if results else "No matches found in output folder."
+            return (
+                "\n".join(results) if results else "No matches found in output folder."
+            )
         except Exception as e:
             return f"Error: Failed to grep output directory: {e}"
 
