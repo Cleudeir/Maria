@@ -201,6 +201,65 @@ def test_save_task_state_creates_missing_task_dir(monkeypatch, tmp_path):
         loaded = json.load(f)
     assert loaded["task_id"] == task_id
 
+def test_resume_incomplete_auto_task_is_marked_failed(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+    task_id = "task_auto_incomplete"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+    state = {
+        "task_id": task_id,
+        "mode": "auto",
+        "status": "running",
+        "task": "Run auto task",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    server.save_task_state(task_id, state)
+
+    server.resume_incomplete_tasks()
+
+    new_state = server.load_task_state(task_id)
+    assert new_state["status"] == "failed"
+    assert "interrupted by application restart" in new_state["details"].lower()
+
+
+def test_resume_incomplete_step_task_is_reset_to_awaiting_intervention(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+    task_id = "task_step_incomplete"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+    state = {
+        "task_id": task_id,
+        "mode": "step",
+        "status": "processando",
+        "task": "Run step task",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    server.save_task_state(task_id, state)
+
+    server.resume_incomplete_tasks()
+
+    new_state = server.load_task_state(task_id)
+    assert new_state["status"] == "awaiting_intervention"
+    assert "interrupted by application restart" in new_state["details"].lower()
+
+def test_save_execution_plan_steps_creates_markdown_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+    task_id = "task_plan_steps"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+    steps = ["Create file", "Run tests", "Refactor code"]
+
+    execution_steps_path = server.save_execution_plan_steps(str(task_path), steps)
+
+    assert os.path.exists(execution_steps_path)
+    with open(execution_steps_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "# Execution Plan Steps" in content
+    assert "1. Create file" in content
+    assert "2. Run tests" in content
+    assert "3. Refactor code" in content
+
 
 def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
     state = {

@@ -319,8 +319,11 @@ function formatOllamaUsage(usage) {
   if (Number.isInteger(usage.total_tokens)) {
     parts.push(`Total: ${usage.total_tokens}`);
   }
-  if (usage.tokens_per_second) {
+  if (Number.isFinite(usage.tokens_per_second)) {
     parts.push(`Speed: ${usage.tokens_per_second} t/s`);
+  }
+  if (Number.isFinite(usage.prompt_tokens_per_second)) {
+    parts.push(`Prompt speed: ${usage.prompt_tokens_per_second} t/s`);
   }
   if (!parts.length && usage.tokens && Number.isInteger(usage.tokens)) {
     parts.push(`Total: ${usage.tokens}`);

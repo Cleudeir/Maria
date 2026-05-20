@@ -155,6 +155,16 @@ def save_step_summary(task_path, step, summary):
     return step_path
 
 
+def save_execution_plan_steps(task_path, steps):
+    plan_dir, _ = ensure_task_plan_dirs(task_path)
+    execution_steps_path = os.path.join(plan_dir, "execution_plan_steps.md")
+    with open(execution_steps_path, "w", encoding="utf-8") as f:
+        f.write("# Execution Plan Steps\n\n")
+        for idx, step in enumerate(steps, 1):
+            f.write(f"{idx}. {step}\n")
+    return execution_steps_path
+
+
 def build_step_prompt(state):
     task_prompt = state.get("task", "")
     prompt_lines = [
@@ -430,6 +440,10 @@ def run_agent_step_sync(
         try:
             steps = agent.create_steps(state["plan"])
             state["steps"] = steps
+            try:
+                save_execution_plan_steps(workspace_path, steps)
+            except Exception:
+                pass
             steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
             state["execution_log"].append(
                 {
@@ -691,9 +705,15 @@ def run_llm_for_tool(state, client):
             return state
 
         state["last_raw_response"] = response_text
-        state["execution_log"].append(
-            {"step": state["step"], "role": "assistant", "content": response_text}
-        )
+        assistant_entry = {
+            "step": state["step"],
+            "role": "assistant",
+            "content": response_text,
+        }
+        usage = client.last_usage
+        if usage:
+            assistant_entry["ollama_usage"] = usage
+        state["execution_log"].append(assistant_entry)
 
         thought, tool_name, args = parse_agent_response(response_text)
 
@@ -1256,11 +1276,40 @@ def manage_lessons():
             return jsonify({"error": str(e)}), 500
 
 
+def mark_incomplete_task_after_restart(task_id, state):
+    """Mark a task incomplete when the application restarts during Ollama streaming."""
+    mode = state.get("mode", "step")
+    status = state.get("status")
+
+    if mode == "auto":
+        state["status"] = "failed"
+        state["details"] = (
+            "Task was interrupted by application restart while Ollama streaming was active. "
+            "The task is incomplete and must be restarted manually."
+        )
+        print(
+            f"[Startup] Marked auto task {task_id} as failed due to restart during Ollama streaming",
+            flush=True,
+        )
+    else:
+        state["status"] = "awaiting_intervention"
+        state["details"] = (
+            "Task was interrupted by application restart while Ollama streaming was active. "
+            "Please review and resume execution manually."
+        )
+        print(
+            f"[Startup] Reset step task {task_id} status to awaiting_intervention due to restart",
+            flush=True,
+        )
+
+    save_task_state(task_id, state)
+
+
 def resume_incomplete_tasks():
     """
-    Scans workspace for incomplete tasks and resumes them.
-    If task mode is auto, restarts the background execution loop.
-    If task mode is step, resets state from processando to awaiting_intervention.
+    Scans workspace for incomplete tasks and marks them incomplete after a restart.
+    If task mode is auto, the task is failed because streaming Ollama cannot safely resume.
+    If task mode is step, the task is reset to awaiting_intervention for manual recovery.
     """
     print("[Startup] Scanning for incomplete tasks to resume...", flush=True)
     try:
@@ -1283,29 +1332,7 @@ def resume_incomplete_tasks():
                         f"[Startup] Found incomplete task: {task_id} (status: {status}, mode: {mode})",
                         flush=True,
                     )
-                    if mode == "auto":
-                        # Put back to running and start background loop
-                        state["status"] = "running"
-                        save_task_state(task_id, state)
-
-                        thread = threading.Thread(
-                            target=background_execution_loop, args=(task_id,)
-                        )
-                        thread.daemon = True
-                        thread.start()
-                        active_threads[task_id] = thread
-                        print(
-                            f"[Startup] Resumed background thread for auto task {task_id}",
-                            flush=True,
-                        )
-                    else:
-                        # Put back to awaiting_intervention since step was interrupted
-                        state["status"] = "awaiting_intervention"
-                        save_task_state(task_id, state)
-                        print(
-                            f"[Startup] Reset task {task_id} status to awaiting_intervention",
-                            flush=True,
-                        )
+                    mark_incomplete_task_after_restart(task_id, state)
     except Exception as e:
         print(f"[Startup] Error resuming incomplete tasks: {e}", flush=True)
 
