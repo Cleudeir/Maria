@@ -1350,6 +1350,79 @@ def pause_task(task_id):
     return jsonify(state)
 
 
+@app.route("/api/tasks/<task_id>/restart", methods=["POST"])
+def restart_task(task_id):
+    state = load_task_state(task_id)
+    if not state:
+        return jsonify({"error": "Task not found"}), 404
+
+    # Only allow restart for failed tasks
+    if state.get("status") not in ("failed",):
+        return jsonify({"error": "Only failed tasks can be restarted"}), 400
+
+    # Kill any old thread (best-effort)
+    if task_id in active_threads:
+        del active_threads[task_id]
+
+    # Reset execution state but keep task description, mode and logs
+    state["status"] = "running"
+    state["stage"] = "improving_prompt"
+    state["step"] = 0
+    state["messages"] = []
+    state["errors_encountered"] = []
+    state["proposed_tool"] = {
+        "name": "improve_prompt",
+        "args": {},
+        "thought": "Restarting task – let's begin by improving the user prompt.",
+    }
+    state["last_raw_response"] = None
+    state["last_tool_result"] = None
+    state["last_user_intervention"] = None
+    state["improved_prompt"] = None
+    state["plan"] = None
+    state["steps"] = []
+    state["current_step_idx"] = 0
+    state["completed_step_summaries"] = []
+    state["current_streaming_response"] = ""
+    state["is_streaming"] = False
+    state["verification_report"] = None
+    state["verification_verdict"] = None
+    state["details"] = None
+    state["execution_log"].append({
+        "step": 0,
+        "role": "system",
+        "content": "🔄 Task restarted by user.",
+    })
+
+    save_task_state(task_id, state)
+
+    mode = state.get("mode", "step")
+
+    def _restart_initial_step():
+        try:
+            run_agent_step_sync(task_id, action="approve")
+            if mode == "auto":
+                background_execution_loop(task_id)
+        except Exception as e:
+            print(f"[Restart] _restart_initial_step crashed for {task_id}: {e}", flush=True)
+            try:
+                s = load_task_state(task_id)
+                if s and s.get("status") not in ("completed", "failed"):
+                    s["status"] = "failed"
+                    s["proposed_tool"] = None
+                    s["details"] = f"Internal restart error: {e}"
+                    save_task_state(task_id, s)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_restart_initial_step)
+    thread.daemon = True
+    thread.start()
+    active_threads[task_id] = thread
+
+    return jsonify(state)
+
+
 @app.route("/api/tasks/<task_id>", methods=["DELETE"])
 def delete_task(task_id):
     task_path = get_task_path(task_id)
