@@ -95,7 +95,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 print(
                     "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                 )
-                err_msg = "Format error: You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
+                err_msg = "Format error: You must output your thoughts followed by exactly one <tool name='...'>...</tool>."
                 errors_encountered.append(
                     {"step": step_num, "type": "format_error", "message": err_msg}
                 )

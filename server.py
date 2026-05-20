@@ -195,9 +195,9 @@ def build_step_prompt(state):
     prompt_lines.extend(
         [
             "Respond using the exact format below:",
-            "<think>Your reasoning here</think>",
+            "[Provide reasoning explaining what you are doing, why you are doing it, and what tool you will use next]",
             "<tool name='tool_name'>JSON arguments here</tool>",
-            "If no tool call is needed, return only <think>...</think> and omit the tool tag or use an empty tool name.",
+            "If no tool call is needed, return only the thoughts and omit the tool tag or use an empty tool name.",
         ]
     )
 
@@ -412,7 +412,7 @@ def run_agent_step_sync(
                 {
                     "step": state["step"],
                     "role": "system",
-                    "content": f"🛠️ Stage 3 Complete: Execution Steps:\n{steps_str}",
+                    "content": f"🛠️ Stage 10 Complete: Execution Steps:\n{steps_str}",
                     "ollama_usage": usage,
                 }
             )
@@ -609,7 +609,7 @@ def run_llm_for_tool(state, client):
     Helper function to query LLM for the next tool call during step execution.
     Handles finish_task to transition steps or stages.
     """
-    max_retries = 3
+    max_retries = 10
     for attempt in range(max_retries + 1):
         state["step"] += 1
         try:
@@ -649,9 +649,9 @@ def run_llm_for_tool(state, client):
 
         if not tool_name:
             if thought:
-                err_msg = "Format error: You wrote a thought but did not call any tool. You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
+                err_msg = "Format error: You wrote a thought but did not call any tool. You must output your thoughts followed by exactly one <tool name='...'>...</tool>."
             else:
-                err_msg = "Format error: You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
+                err_msg = "Format error: You must output your thoughts followed by exactly one <tool name='...'>...</tool>."
 
             if attempt < max_retries:
                 state["errors_encountered"].append(
