@@ -60,6 +60,27 @@ class ToolExecutor:
         # Ensure workspace directory exists
         os.makedirs(self.workspace_dir, exist_ok=True)
 
+    def _resolve_output_path(self, path: str) -> tuple[str, str | None]:
+        """
+        Resolve a relative path under the workspace output directory.
+        Returns (absolute_path, error_message).
+        """
+        if os.path.isabs(path):
+            return "", "Error: Access Denied. Absolute paths are not allowed."
+
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        if path in ("", ".", "./", "output"):
+            target = output_dir
+        else:
+            normalized_path = path
+            if normalized_path.startswith("output" + os.sep):
+                normalized_path = normalized_path[len("output" + os.sep) :]
+            target = os.path.abspath(os.path.join(output_dir, normalized_path))
+
+        if not is_path_safe(output_dir, target):
+            return "", "Error: Access Denied. Path is outside output directory."
+        return target, None
+
     def list_dir(self, path: str = ".") -> str:
         """
         Lists files and subdirectories in the workspace output directory.
@@ -108,12 +129,12 @@ class ToolExecutor:
 
     def read_file(self, path: str) -> str:
         """
-        Reads contents of file relative to workspace.
+        Reads contents of a file inside the workspace output directory.
         """
-        if not is_path_safe(self.workspace_dir, path):
-            return "Error: Access Denied. Path is outside workspace."
+        target_file, error = self._resolve_output_path(path)
+        if error:
+            return error
 
-        target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
         if not os.path.exists(target_file):
             return f"Error: File '{path}' does not exist."
         if os.path.isdir(target_file):
@@ -170,12 +191,11 @@ class ToolExecutor:
 
     def find_in_files(self, query: str, path: str = ".") -> str:
         """
-        Finds occurrences of a query (string or regex) inside files in a directory path relative to workspace.
+        Finds occurrences of a query (string or regex) inside files under the workspace output directory.
         """
-        if not is_path_safe(self.workspace_dir, path):
-            return "Error: Access Denied. Path is outside workspace."
-
-        target_dir = os.path.abspath(os.path.join(self.workspace_dir, path))
+        target_dir, error = self._resolve_output_path(path)
+        if error:
+            return error
         if not os.path.exists(target_dir):
             return f"Error: Path '{path}' does not exist."
 
@@ -280,12 +300,12 @@ class ToolExecutor:
 
     def edit_file(self, path: str, target: str, replacement: str) -> str:
         """
-        Edits a file relative to workspace by replacing a target block of text with a replacement block.
+        Edits a file inside the workspace output directory by replacing a target block of text with a replacement block.
         """
-        if not is_path_safe(self.workspace_dir, path):
-            return "Error: Access Denied. Path is outside workspace."
+        target_file, error = self._resolve_output_path(path)
+        if error:
+            return error
 
-        target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
         if not os.path.exists(target_file):
             return f"Error: File '{path}' does not exist."
         if os.path.isdir(target_file):

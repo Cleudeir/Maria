@@ -36,6 +36,28 @@ def test_tool_executor_write_file_restriction(tmp_path):
     assert not (workspace / "test.txt").exists()
 
 
+def test_tool_executor_read_file_and_edit_file_use_output_root(tmp_path):
+    workspace = tmp_path / "task_888"
+    workspace.mkdir()
+    output_dir = workspace / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "test.txt").write_text("hello")
+
+    executor = ToolExecutor(str(workspace))
+
+    # read_file should treat path relative to output/
+    res_read = executor.read_file("test.txt")
+    assert "hello" in res_read
+
+    res_read_output = executor.read_file("output/test.txt")
+    assert "hello" in res_read_output
+
+    # edit_file should edit file inside output/
+    res_edit = executor.edit_file("test.txt", "hello", "hello updated")
+    assert "Success" in res_edit
+    assert (output_dir / "test.txt").read_text() == "hello updated"
+
+
 def test_tool_executor_run_command_uses_output_root(tmp_path):
     workspace = tmp_path / "task_999"
     workspace.mkdir()
@@ -58,15 +80,25 @@ def test_server_edit_route_restriction(monkeypatch, tmp_path):
 
     client = server.app.test_client()
 
-    # Editing file outside output/ should be blocked
+    # Editing file under output/ should be allowed by default root path behavior
     response = client.post(
         f"/api/tasks/{task_id}/files/edit",
         json={"path": "test.txt", "content": "hello"},
     )
-    assert response.status_code == 403
-    assert not (task_path / "test.txt").exists()
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert (task_path / "output" / "test.txt").exists()
+    assert (task_path / "output" / "test.txt").read_text() == "hello"
 
-    # Editing file inside output/ should be allowed
+    # Traversal outside output/ should still be blocked
+    response = client.post(
+        f"/api/tasks/{task_id}/files/edit",
+        json={"path": "../test.txt", "content": "hello bypass"},
+    )
+    assert response.status_code == 403
+    assert not (task_path.parent / "test.txt").exists()
+
+    # Editing file inside output/ should still be allowed explicitly
     response = client.post(
         f"/api/tasks/{task_id}/files/edit",
         json={"path": "output/test.txt", "content": "hello output"},
@@ -112,9 +144,9 @@ def test_new_tools_restrictions(tmp_path):
         output_dir / "test.txt"
     ).read_text() == "hello beautiful python world\nline 2 here"
 
-    # Test edit_file outside output/ (should be blocked)
+    # Test edit_file using traversal out of output/ (should be blocked)
     res_edit_bad = executor.edit_file(
-        "outside.txt", "hello python outside", "should not change"
+        "../outside.txt", "hello python outside", "should not change"
     )
     assert "Error: Access Denied" in res_edit_bad
     assert (

@@ -1189,10 +1189,19 @@ def edit_task_file(task_id):
         return jsonify({"error": "File path and content are required"}), 400
 
     task_path = get_task_path(task_id)
-    target_file = os.path.abspath(os.path.join(task_path, path))
+    output_dir = os.path.abspath(os.path.join(task_path, "output"))
 
-    # Security check
-    if not target_file.startswith(os.path.abspath(task_path)):
+    if os.path.isabs(path):
+        return jsonify({"error": "Access denied"}), 403
+
+    normalized_path = path
+    if normalized_path.startswith("output" + os.sep):
+        normalized_path = normalized_path[len("output" + os.sep) :]
+
+    target_file = os.path.abspath(os.path.join(output_dir, normalized_path))
+
+    # Security check: enforce output directory only
+    if not target_file.startswith(output_dir):
         return jsonify({"error": "Access denied"}), 403
 
     try:

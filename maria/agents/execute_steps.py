@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Tuple
 from maria.ollama import format_messages_to_prompt
 from maria.agents.utils import parse_agent_response
 
+
 def execute_steps(
     steps: List[str],
     plan: str,
@@ -100,12 +101,8 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 errors_encountered.append(
                     {"step": step_num, "type": "format_error", "message": err_msg}
                 )
-                step_messages.append(
-                    {"role": "assistant", "content": response_text}
-                )
-                step_messages.append(
-                    {"role": "user", "content": f"ERROR:\n{err_msg}"}
-                )
+                step_messages.append({"role": "assistant", "content": response_text})
+                step_messages.append({"role": "user", "content": f"ERROR:\n{err_msg}"})
                 execution_log.append(
                     {
                         "step": len(execution_log),
@@ -146,12 +143,12 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     args.get("query", ""), args.get("path", ".")
                 )
             elif tool_name == "grep_output":
-                tool_result = executor.grep_output(
-                    args.get("query", "")
-                )
+                tool_result = executor.grep_output(args.get("query", ""))
             elif tool_name == "edit_file":
                 tool_result = executor.edit_file(
-                    args.get("path", ""), args.get("target", ""), args.get("replacement", "")
+                    args.get("path", ""),
+                    args.get("target", ""),
+                    args.get("replacement", ""),
                 )
             elif tool_name == "run_command":
                 tool_result = executor.run_command(args.get("command", ""))
