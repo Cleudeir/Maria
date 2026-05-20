@@ -250,4 +250,29 @@
     *   *Refining the Prompt:*
         "Act as a Senior Game Developer. Create a fully functional Snake game implementation. Use Python with Pygame. Include score tracking, high score persistence (local storage), collision detection (walls and self), and input handling (arrow keys). Ensure the game loop is efficient. Provide a complete, runnable script. Include comments explaining the code. Add a section for testing strategies to verify game logic (e.g., snake growth, collision)."
 
-    *   *Wait, I need to make it "extremely clear, detailed, precise, and structured
+    *   *Wait, I need to make it "extremely clear, detailed, precise, and structured" as per the instruction.*
+    *   I need to ensure the *prompt itself* is the output. The user wants me to optimize "game snake" into a better prompt.
+
+    *   *Revised Plan:*
+        1.  Define the role (Game Developer).
+        2.  Define the task (Build Snake Game).
+        3.  Define the tech stack (Python/Pygame is standard, but maybe specify "Web-based" or "Python" - let's pick Python for code clarity).
+        4.  List specific features (Grid system, Food, Snake body, Score, Game Over).
+        5.  List edge cases (Wall collision, Self collision, Input buffering).
+        6.  Define output (Complete code, instructions).
+        7.  Define testing (How to verify correctness).
+
+5.  **Finalizing the Prompt Content:**
+    *   **Role:** Senior Software Engineer specializing in game development.
+    *   **Task:** Develop a classic Snake game.
+    *   **Language:** Python (using Pygame library).
+    *   **Requirements:**
+        *   Grid-based movement.
+        *   Snake grows when eating food.
+        *   Collision detection (walls, self).
+        *   Score tracking.
+        *   Start/Pause/Restart functionality.
+    *   **Edge Cases:**
+        *   Prevent reversing direction directly.
+        *   Handle rapid key presses.
+        *
