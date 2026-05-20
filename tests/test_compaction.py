@@ -1,6 +1,6 @@
 import os
 from unittest.mock import MagicMock
-from maria.self_improvement import parse_compacted_lessons_response, SelfImprovementAgent
+from maria.agents import parse_compacted_lessons_response, SelfImprovementAgent
 from maria.memory import load_system_prompt, load_lessons
 
 def test_parse_compacted_lessons_response():
@@ -71,7 +71,7 @@ def test_compact_lessons_integration(tmpdir, monkeypatch):
       </lesson>
     </compacted_lessons>
     """)
-    monkeypatch.setattr("maria.self_improvement.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.self_improvement.getGenerate", mock_get_generate)
     
     # Run compaction
     success = agent.compact_lessons([

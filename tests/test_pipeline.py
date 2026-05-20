@@ -1,6 +1,6 @@
 import os
 from unittest.mock import MagicMock
-from maria.agent import MariaAgent
+from maria.agents import MariaAgent
 
 def test_improve_prompt(tmpdir, monkeypatch):
     workspace = str(tmpdir.mkdir("workspace"))
@@ -8,7 +8,7 @@ def test_improve_prompt(tmpdir, monkeypatch):
     
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="Improved task instruction.")
-    monkeypatch.setattr("maria.agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
     
     improved = agent.improve_prompt("Test task", [])
     assert improved == "Improved task instruction."
@@ -20,7 +20,7 @@ def test_generate_plan(tmpdir, monkeypatch):
     
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="# My Plan\nStep 1...")
-    monkeypatch.setattr("maria.agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
     
     plan = agent.generate_plan("Improved task")
     assert plan == "# My Plan\nStep 1..."
@@ -31,7 +31,7 @@ def test_create_steps(tmpdir, monkeypatch):
     
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="1. Create file\n2. Run tests")
-    monkeypatch.setattr("maria.agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
     
     steps = agent.create_steps("Plan text")
     assert len(steps) == 2
@@ -48,7 +48,7 @@ def test_verify_execution(tmpdir, monkeypatch):
         
     agent = MariaAgent(workspace, memory)
     mock_get_generate = MagicMock(return_value="<analysis>Audited successfully</analysis>\n<verdict>SUCCESS</verdict>")
-    monkeypatch.setattr("maria.agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
     
     verdict, analysis = agent.verify_execution("Plan text", ["Create file"])
     assert verdict == "SUCCESS"
@@ -79,7 +79,7 @@ def test_agent_run_pipeline_success(tmpdir, monkeypatch):
         '<thought>Done step 2</thought><tool name="finish_task"><summary>Summary 2</summary></tool>'
     ]
     mock_get_generate = MagicMock(side_effect=responses)
-    monkeypatch.setattr("maria.agent.getGenerate", mock_get_generate)
+    monkeypatch.setattr("maria.agents.maria_agent.getGenerate", mock_get_generate)
     
     # Mock verification
     agent.verify_execution = MagicMock(return_value=("SUCCESS", "All clean"))

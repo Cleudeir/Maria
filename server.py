@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from maria.llm import OllamaClient
-from maria.agent import parse_agent_response, MariaAgent
+from maria.agents import parse_agent_response, MariaAgent, SelfImprovementAgent
 from maria.security import is_command_critical
 from maria.tools import ToolExecutor, terminate_task_process_groups
 from maria.memory import (
@@ -22,7 +22,6 @@ from maria.memory import (
     save_system_prompt,
     save_lessons,
 )
-from maria.self_improvement import SelfImprovementAgent
 from maria.ollama import getGenerate, get_last_usage, format_messages_to_prompt
 
 # Set server environment variable for bypassing security console prompts

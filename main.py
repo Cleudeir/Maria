@@ -1,8 +1,7 @@
 import argparse
 import os
 import sys
-from maria.agent import MariaAgent
-from maria.self_improvement import SelfImprovementAgent
+from maria.agents import MariaAgent, SelfImprovementAgent
 
 def main():
     parser = argparse.ArgumentParser(description="Maria: Self-Improving Agentic SLM System (Qwen3.5:4b)")

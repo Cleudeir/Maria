@@ -1,5 +1,4 @@
-from maria.agent import parse_agent_response
-from maria.self_improvement import parse_self_improvement_response
+from maria.agents import parse_agent_response, parse_self_improvement_response
 
 
 def test_parse_agent_response():
@@ -82,7 +81,7 @@ def factorial(n):
 
 
 def test_is_llm_response():
-    from maria.agent import is_llm_response
+    from maria.agents import is_llm_response
 
     assert is_llm_response("<thought>Hello</thought><tool name='finish_task'></tool>")
     assert is_llm_response('<tool name="read_file">')
