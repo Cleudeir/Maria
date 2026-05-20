@@ -1,6 +1,7 @@
 import re
 from typing import List, Dict, Tuple, Any
 
+
 def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     """
     Parses agent response using regex to extract thoughts and XML-like tool calls.
@@ -47,18 +48,28 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     def get_param(param_name: str, is_line_matching: bool = False) -> str:
         # 1. Try nested tag first
         if is_line_matching:
-            nested_match = re.search(rf"<{param_name}>([^<]*)", response_text, re.IGNORECASE)
+            nested_match = re.search(
+                rf"<{param_name}>([^<]*)", response_text, re.IGNORECASE
+            )
         else:
             nested_match = re.search(
-                rf"<{param_name}>(.*?)(?:</{param_name}>|\Z)", response_text, re.DOTALL | re.IGNORECASE
+                rf"<{param_name}>(.*?)(?:</{param_name}>|\Z)",
+                response_text,
+                re.DOTALL | re.IGNORECASE,
             )
         if nested_match and nested_match.group(1).strip():
             val = nested_match.group(1)
-            return val if param_name in ("content", "target", "replacement") else val.strip()
+            return (
+                val
+                if param_name in ("content", "target", "replacement")
+                else val.strip()
+            )
 
         # 2. Try attribute in the tool tag
         attr_match = re.search(
-            rf"\b{param_name}\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))", tag_content, re.IGNORECASE
+            rf"\b{param_name}\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))",
+            tag_content,
+            re.IGNORECASE,
         )
         if attr_match:
             val = attr_match.group(1) or attr_match.group(2)
@@ -66,7 +77,13 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
         return ""
 
     # Extract path if relevant
-    if tool_name in ("list_dir", "read_file", "write_file", "edit_file", "find_in_files"):
+    if tool_name in (
+        "list_dir",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "find_in_files",
+    ):
         args["path"] = get_param("path", is_line_matching=True)
 
     # Extract content if write_file
@@ -103,7 +120,9 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
         "summary",
     ):
         if param_name not in args:
-            value = get_param(param_name, is_line_matching=(param_name in ("path", "command")))
+            value = get_param(
+                param_name, is_line_matching=(param_name in ("path", "command"))
+            )
             if value:
                 args[param_name] = value
 
@@ -119,7 +138,9 @@ def is_llm_response(response_text: str) -> bool:
     return False
 
 
-def parse_self_improvement_response(response_text: str) -> Tuple[str, List[Dict[str, str]], str]:
+def parse_self_improvement_response(
+    response_text: str,
+) -> Tuple[str, List[Dict[str, str]], str]:
     """
     Parses the self-improvement output from the meta-agent.
     """

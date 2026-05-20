@@ -106,7 +106,7 @@
                     </div>
                 </div>
                 
-                <div class="task-header-actions">
+                    <div class="task-header-actions">
                     <button class="btn-action danger" onclick="deleteActiveTask()">
                         <i class="fa-solid fa-trash-can"></i> Delete
                     </button>
@@ -166,6 +166,19 @@
                     <div class="workspace-header">
                         <span>Workspace Files</span>
                         <i class="fa-solid fa-folder-open" style="color: var(--text-muted);"></i>
+                    </div>
+
+                    <div class="supervision-card" id="supervision-banner" style="display: none;">
+                        <div class="supervision-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                        <div class="supervision-info">
+                            <div class="supervision-heading" id="supervision-title">Supervisor Review</div>
+                            <div class="supervision-meta-row">
+                                <span class="supervision-pill" id="supervision-status"></span>
+                                <span class="supervision-timestamp" id="supervision-timestamp"></span>
+                            </div>
+                            <div class="supervision-reason" id="supervision-reason"></div>
+                            <div class="supervision-extra" id="supervision-extra"></div>
+                        </div>
                     </div>
                     
                     <div class="file-tree-container" id="file-tree">

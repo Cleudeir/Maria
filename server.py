@@ -225,9 +225,31 @@ def build_file_tree(dir_path, base_path, current_depth=0, max_depth=5):
                     full_path, base_path, current_depth + 1, max_depth
                 )
             tree.append(node)
-    except Exception as e:
+    except Exception:
         pass
     return tree
+
+
+def build_output_file_tree(task_path):
+    output_dir = os.path.join(task_path, "output")
+    if not os.path.exists(output_dir):
+        return [
+            {
+                "name": "output",
+                "path": "output",
+                "type": "directory",
+                "children": [],
+            }
+        ]
+
+    return [
+        {
+            "name": "output",
+            "path": "output",
+            "type": "directory",
+            "children": build_file_tree(output_dir, task_path),
+        }
+    ]
 
 
 # --- Core Task Stepping Execution Logic ---
@@ -1015,8 +1037,8 @@ def get_task(task_id):
     if not state:
         return jsonify({"error": "Task not found"}), 404
 
-    # Include file tree for workspace pane
-    state["file_tree"] = build_file_tree(get_task_path(task_id), get_task_path(task_id))
+    # Include output-only file tree for workspace pane
+    state["file_tree"] = build_output_file_tree(get_task_path(task_id))
     return jsonify(state)
 
 

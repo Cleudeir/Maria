@@ -175,6 +175,40 @@ async function getTaskDetails(taskId) {
     document.getElementById("active-task-step").innerText =
       `Step: ${task.step}`;
 
+    const supervisorBanner = document.getElementById("supervision-banner");
+    if (task.supervision_status && task.supervision_status !== "idle") {
+      const bannerTitle = document.getElementById("supervision-title");
+      const statusLabel = document.getElementById("supervision-status");
+      const reasonLabel = document.getElementById("supervision-reason");
+      const timestampLabel = document.getElementById("supervision-timestamp");
+      const extraLabel = document.getElementById("supervision-extra");
+
+      const statusText = task.supervision_status.replace(/_/g, " ").toUpperCase();
+      statusLabel.innerText = statusText;
+      statusLabel.className = `supervision-pill status-${task.supervision_status}`;
+
+      if (task.supervision_status === "reroute") {
+        bannerTitle.innerText = "Supervisor Rerouted the Next Step";
+      } else if (task.supervision_status === "pause") {
+        bannerTitle.innerText = "Supervisor Paused Execution";
+      } else {
+        bannerTitle.innerText = "Supervisor Approved the Action";
+      }
+
+      reasonLabel.innerText = task.supervision_reason || "No supervisor reasoning available.";
+      timestampLabel.innerText = task.supervision_last_review
+        ? `Reviewed: ${new Date(task.supervision_last_review).toLocaleString()}`
+        : "";
+      extraLabel.innerText =
+        task.supervision_status === "reroute" && Array.isArray(task.steps)
+          ? `New active step: ${task.steps[task.current_step_idx] || "(unknown)"}`
+          : "";
+
+      supervisorBanner.style.display = "grid";
+    } else {
+      supervisorBanner.style.display = "none";
+    }
+
     // Render Execution logs
     renderExecutionLogs(task.execution_log);
 
