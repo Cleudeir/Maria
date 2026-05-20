@@ -170,3 +170,21 @@ def new_function():
     assert args3["path"] == "output/test.py"
     assert "\ndef old_function():\n    return True\n      " in args3["target"]
     assert "\ndef new_function():\n    return False\n      " in args3["replacement"]
+
+
+def test_parse_agent_response_self_closing():
+    response = """
+    I need to read the index.html file.
+    <tool name="read_file" path="output/index.html" />
+    """
+    thought, tool, args = parse_agent_response(response)
+    assert thought == "I need to read the index.html file."
+    assert tool == "read_file"
+    assert args["path"] == "output/index.html"
+
+    # Test with single quotes and extra spacing/no spaces
+    response2 = "Check dir <tool name='list_dir' path='.'/>"
+    thought2, tool2, args2 = parse_agent_response(response2)
+    assert thought2 == "Check dir"
+    assert tool2 == "list_dir"
+    assert args2["path"] == "."

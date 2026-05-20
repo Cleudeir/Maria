@@ -5,10 +5,11 @@ from maria.ollama import getGenerate, get_last_usage, format_messages_to_prompt,
 
 class OllamaClient:
     def __init__(
-        self, base_url: str = "http://localhost:11434", model: str = "qwen3.5:4b"
+        self, base_url: str = "http://localhost:11434", model: str = "qwen3.5:4b", model_think: bool = True
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.model_think = model_think
         self.token = os.environ.get("OLLAMA_TOKEN", "banana")
         self.headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         
@@ -16,6 +17,7 @@ class OllamaClient:
         import maria.ollama
         maria.ollama.BASE_URL = self.base_url
         maria.ollama.MODEL = self.model
+        maria.ollama.MODEL_THINK = self.model_think
 
     @property
     def last_usage(self) -> Dict[str, Any]:

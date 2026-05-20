@@ -791,6 +791,7 @@ async function submitNewTask() {
     return;
   }
   const mode = document.getElementById("new-task-mode").value;
+  const modelThink = document.getElementById("new-task-model-think").checked;
 
   closeModals();
 
@@ -798,12 +799,13 @@ async function submitNewTask() {
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task: taskText, mode: mode }),
+      body: JSON.stringify({ task: taskText, mode: mode, model_think: modelThink }),
     });
     const task = await res.json();
 
     // Clear fields
     document.getElementById("new-task-prompt").value = "";
+    document.getElementById("new-task-model-think").checked = true;
 
     // Select and load the new task
     selectTask(task.task_id);

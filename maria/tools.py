@@ -62,7 +62,7 @@ class ToolExecutor:
 
     def list_dir(self, path: str = ".") -> str:
         """
-        Lists files in path relative to workspace.
+        Lists files and subdirectories in path (recursively) relative to workspace.
         """
         if not is_path_safe(self.workspace_dir, path):
             return "Error: Access Denied. Path is outside workspace."
@@ -74,15 +74,21 @@ class ToolExecutor:
             return f"Error: Path '{path}' is not a directory."
 
         try:
-            items = os.listdir(target_dir)
             result = []
-            for item in sorted(items):
-                # Hide internal task metadata files
-                if item in ("task_state.json", "task_info.html"):
-                    continue
-                item_path = os.path.join(target_dir, item)
-                is_dir = os.path.isdir(item_path)
-                result.append(f"{'[DIR]' if is_dir else '[FILE]'} {item}")
+            for root, dirs, files in os.walk(target_dir):
+                # Prune unwanted/large directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.venv', 'venv')]
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    rel_path = os.path.relpath(dir_path, target_dir)
+                    result.append(f"[DIR] {rel_path}")
+                for f in files:
+                    if f.startswith('.') or f in ("task_state.json", "task_info.html"):
+                        continue
+                    file_path = os.path.join(root, f)
+                    rel_path = os.path.relpath(file_path, target_dir)
+                    result.append(f"[FILE] {rel_path}")
+            result.sort()
             return "\n".join(result) if result else "(Empty directory)"
         except Exception as e:
             return f"Error: Failed to list directory: {e}"

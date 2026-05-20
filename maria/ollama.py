@@ -13,6 +13,7 @@ BASE_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
 TEMPERATURE = 0.9
 STOP = None
+MODEL_THINK = True
 
 def strip_thinking_process(text: str) -> str:
     if not isinstance(text, str):
@@ -67,6 +68,7 @@ def getGenerate(system_text: Optional[str], user_text: str) -> str:
     model = MODEL
     temperature = TEMPERATURE
     stop = STOP
+    model_think = MODEL_THINK
 
     url = f"{base_url.rstrip('/')}/api/generate"
     
@@ -74,6 +76,7 @@ def getGenerate(system_text: Optional[str], user_text: str) -> str:
         "model": model,
         "prompt": user_text,
         "stream": True,
+        "think": model_think,
         "options": {
             "temperature": temperature,
             "num_ctx": 8192,

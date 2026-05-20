@@ -20,11 +20,12 @@ class MariaAgent:
         workspace_dir: str,
         memory_dir: str,
         ollama_url: str = "http://localhost:11434",
+        model_think: bool = True,
     ):
         self.workspace_dir = os.path.abspath(workspace_dir)
         os.makedirs(self.workspace_dir, exist_ok=True)
         self.memory_dir = os.path.abspath(memory_dir)
-        self.client = OllamaClient(base_url=ollama_url)
+        self.client = OllamaClient(base_url=ollama_url, model_think=model_think)
         self.executor = ToolExecutor(self.workspace_dir)
         self.execution_log = []
         self.errors_encountered = []

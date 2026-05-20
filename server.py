@@ -210,6 +210,8 @@ def build_file_tree(dir_path, base_path, current_depth=0, max_depth=5):
     tree = []
     try:
         for entry in sorted(os.listdir(dir_path)):
+            if current_depth == 0 and entry != "output":
+                continue
             if entry in (
                 "__pycache__",
                 ".pytest_cache",
@@ -296,10 +298,17 @@ def run_agent_step_sync(
 
     workspace_path = get_task_path(task_id)
     executor = ToolExecutor(workspace_path, task_id=task_id)
-    client = OllamaClient(base_url=state.get("ollama_url", OLLAMA_URL))
+    model_think = state.get("model_think", True)
+    client = OllamaClient(
+        base_url=state.get("ollama_url", OLLAMA_URL),
+        model_think=model_think
+    )
 
     agent = MariaAgent(
-        workspace_path, MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL)
+        workspace_path,
+        MEMORY_DIR,
+        ollama_url=state.get("ollama_url", OLLAMA_URL),
+        model_think=model_think
     )
 
     # Load memories
@@ -549,6 +558,11 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         "content": tool_result,
                     }
                 )
+                state["proposed_tool"] = None
+                save_task_state(task_id, state)
+            elif action in ("approve", "modify"):
+                state["proposed_tool"] = None
+                save_task_state(task_id, state)
 
             # Get next tool proposal
             state = run_llm_for_tool(state, client)
@@ -770,7 +784,9 @@ def trigger_self_improvement(task_id, state):
     def run_improvement():
         try:
             meta_agent = SelfImprovementAgent(
-                MEMORY_DIR, ollama_url=state.get("ollama_url", OLLAMA_URL)
+                MEMORY_DIR,
+                ollama_url=state.get("ollama_url", OLLAMA_URL),
+                model_think=state.get("model_think", True),
             )
             meta_agent.improve(
                 state["task"], state["execution_log"], state["errors_encountered"]
@@ -943,6 +959,7 @@ def create_task():
         return jsonify({"error": "Task prompt is required"}), 400
 
     mode = data.get("mode", "step")  # 'step' or 'auto'
+    model_think = data.get("model_think", True)
 
     # 1. Create isolated directory
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -980,6 +997,7 @@ def create_task():
         "stage": "improving_prompt",
         "step": 0,
         "ollama_url": OLLAMA_URL,
+        "model_think": model_think,
         "messages": [],
         "execution_log": [
             {
@@ -1048,6 +1066,7 @@ def get_task(task_id):
                 "status": "legacy",
                 "stage": "completed",
                 "step": 0,
+                "model_think": True,
                 "messages": [],
                 "execution_log": [
                     {

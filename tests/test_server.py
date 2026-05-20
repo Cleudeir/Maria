@@ -168,7 +168,7 @@ def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
     assert new_state["status"] == "awaiting_intervention"
     assert new_state["proposed_tool"] is None
     assert any(err["type"] == "format_error" for err in new_state["errors_encountered"])
-    assert mock_get_generate.call_count == 8
+    assert mock_get_generate.call_count == 22
 
 
 def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
@@ -233,3 +233,36 @@ def test_get_legacy_task_fallback(monkeypatch, tmp_path):
     assert data["task"] == "create snake game"
     assert data["status"] == "legacy"
     assert "file_tree" in data
+
+
+def test_create_task_with_model_think(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+
+    client = server.app.test_client()
+    
+    # 1. Create a task with model_think = False
+    response = client.post(
+        "/api/tasks",
+        json={"task": "Test task with think disabled", "mode": "step", "model_think": False}
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["model_think"] is False
+
+    # 2. Create a task with model_think = True
+    response = client.post(
+        "/api/tasks",
+        json={"task": "Test task with think enabled", "mode": "step", "model_think": True}
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["model_think"] is True
+
+    # 3. Create a task without model_think (should default to True)
+    response = client.post(
+        "/api/tasks",
+        json={"task": "Test task with default think", "mode": "step"}
+    )
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["model_think"] is True

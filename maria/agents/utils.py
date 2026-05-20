@@ -4,71 +4,83 @@ from typing import List, Dict, Tuple, Any
 def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     """
     Parses agent response using regex to extract thoughts and XML-like tool calls.
+    Supports both nested XML tags and tag attributes (including self-closing tags).
     """
     if not isinstance(response_text, str):
         return "", "", {}
 
     # Extract all text before <tool as the thought if a tool is present
-    if re.search(r"<tool\s+name=", response_text, re.IGNORECASE):
+    if re.search(r"<tool\b", response_text, re.IGNORECASE):
         pre_tool_match = re.search(
-            r"^(.*?)(?:<tool|\Z)", response_text, re.DOTALL | re.IGNORECASE
+            r"^(.*?)(?:<tool\b|\Z)", response_text, re.DOTALL | re.IGNORECASE
         )
         thought = pre_tool_match.group(1).strip() if pre_tool_match else ""
     else:
         thought = ""
 
-    # Find tool call name
-    tool_match = re.search(
-        r"<tool\s+name=[\"']([^\"']+)[\"']\s*>", response_text, re.IGNORECASE
-    )
-    if not tool_match:
+    # Find the tool tag
+    tool_tag_match = re.search(r"<tool\b[^>]*>", response_text, re.IGNORECASE)
+    if not tool_tag_match:
         return thought, "", {}
 
-    tool_name = tool_match.group(1).strip().lower()
+    tag_content = tool_tag_match.group(0)
+
+    # Extract tool name from tool tag attributes
+    name_match = re.search(
+        r"\bname\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))", tag_content, re.IGNORECASE
+    )
+    if not name_match:
+        return thought, "", {}
+
+    tool_name = (name_match.group(1) or name_match.group(2)).strip().lower()
     args = {}
 
-    # Extract path if relevant - match until the next '<' character to handle closing tag typos
-    if tool_name in ("list_dir", "read_file", "write_file", "edit_file", "find_in_files"):
-        path_match = re.search(r"<path>([^<]*)", response_text, re.IGNORECASE)
-        args["path"] = path_match.group(1).strip() if path_match else ""
+    # Helper function to extract a parameter value
+    def get_param(param_name: str, is_line_matching: bool = False) -> str:
+        # 1. Try nested tag first
+        if is_line_matching:
+            nested_match = re.search(rf"<{param_name}>([^<]*)", response_text, re.IGNORECASE)
+        else:
+            nested_match = re.search(
+                rf"<{param_name}>(.*?)(?:</{param_name}>|\Z)", response_text, re.DOTALL | re.IGNORECASE
+            )
+        if nested_match and nested_match.group(1).strip():
+            val = nested_match.group(1)
+            return val if param_name in ("content", "target", "replacement") else val.strip()
 
-    # Extract content if write_file - match until closing tag or end of text
-    if tool_name == "write_file":
-        content_match = re.search(
-            r"<content>(.*?)(?:</content>|\Z)", response_text, re.DOTALL | re.IGNORECASE
+        # 2. Try attribute in the tool tag
+        attr_match = re.search(
+            rf"\b{param_name}\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))", tag_content, re.IGNORECASE
         )
-        args["content"] = content_match.group(1) if content_match else ""
+        if attr_match:
+            val = attr_match.group(1) or attr_match.group(2)
+            return val
+        return ""
+
+    # Extract path if relevant
+    if tool_name in ("list_dir", "read_file", "write_file", "edit_file", "find_in_files"):
+        args["path"] = get_param("path", is_line_matching=True)
+
+    # Extract content if write_file
+    if tool_name == "write_file":
+        args["content"] = get_param("content")
 
     # Extract query if find_in_files or grep_output
     if tool_name in ("find_in_files", "grep_output"):
-        query_match = re.search(
-            r"<query>(.*?)(?:</query>|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        args["query"] = query_match.group(1).strip() if query_match else ""
+        args["query"] = get_param("query")
 
     # Extract target and replacement if edit_file
     if tool_name == "edit_file":
-        target_match = re.search(
-            r"<target>(.*?)(?:</target>|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        args["target"] = target_match.group(1) if target_match else ""
+        args["target"] = get_param("target")
+        args["replacement"] = get_param("replacement")
 
-        replacement_match = re.search(
-            r"<replacement>(.*?)(?:</replacement>|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        args["replacement"] = replacement_match.group(1) if replacement_match else ""
-
-    # Extract command if run_command - match until next '<' character
+    # Extract command if run_command
     if tool_name == "run_command":
-        command_match = re.search(r"<command>([^<]*)", response_text, re.IGNORECASE)
-        args["command"] = command_match.group(1).strip() if command_match else ""
+        args["command"] = get_param("command", is_line_matching=True)
 
     # Extract summary if finish_task
     if tool_name == "finish_task":
-        summary_match = re.search(
-            r"<summary>(.*?)(?:</summary>|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        args["summary"] = summary_match.group(1).strip() if summary_match else ""
+        args["summary"] = get_param("summary")
 
     return thought, tool_name, args
 
@@ -77,7 +89,7 @@ def is_llm_response(response_text: str) -> bool:
     """Detect whether a loop response looks like an LLM assistant response."""
     if not isinstance(response_text, str) or not response_text.strip():
         return False
-    if re.search(r"<tool\s+name=", response_text, re.IGNORECASE):
+    if re.search(r"<tool\b", response_text, re.IGNORECASE):
         return True
     return False
 
