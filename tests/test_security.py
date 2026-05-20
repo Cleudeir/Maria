@@ -14,6 +14,8 @@ def test_is_path_safe():
     assert is_path_safe(base, "../file.txt") is False
     assert is_path_safe(base, "/etc/passwd") is False
     assert is_path_safe(base, "sub/../../../file.txt") is False
+    assert is_path_safe(base, "../workspace_backup/file.txt") is False
+    assert is_path_safe(base, "../workspace_backup") is False
 
 
 def test_is_command_critical():

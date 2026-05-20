@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import signal
 import time
@@ -118,6 +119,10 @@ class ToolExecutor:
 
         target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
 
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        if not is_path_safe(output_dir, target_file):
+            return "Error: Access Denied. Output files must be saved within the 'output' directory or its subfolders."
+
         filename = os.path.basename(target_file)
         if filename in ("task_state.json", "task_info.html"):
             return "Error: Access Denied. Internal system file."
@@ -130,6 +135,127 @@ class ToolExecutor:
             return f"Success: File '{path}' written successfully."
         except Exception as e:
             return f"Error: Failed to write file: {e}"
+
+    def find_in_files(self, query: str, path: str = ".") -> str:
+        """
+        Finds occurrences of a query (string or regex) inside files in a directory path relative to workspace.
+        """
+        if not is_path_safe(self.workspace_dir, path):
+            return "Error: Access Denied. Path is outside workspace."
+
+        target_dir = os.path.abspath(os.path.join(self.workspace_dir, path))
+        if not os.path.exists(target_dir):
+            return f"Error: Path '{path}' does not exist."
+
+        try:
+            pattern = re.compile(query)
+        except Exception:
+            pattern = None
+
+        results = []
+        try:
+            for root, dirs, files in os.walk(target_dir):
+                # Exclude hidden files/dirs and some standard big folders to keep it fast
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.venv', 'venv')]
+                for file in files:
+                    if file.startswith('.') or file in ('task_state.json', 'task_info.html'):
+                        continue
+                    file_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(file_path, self.workspace_dir)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            for lineno, line in enumerate(f, 1):
+                                match = False
+                                if pattern:
+                                    if pattern.search(line):
+                                        match = True
+                                elif query in line:
+                                    match = True
+
+                                if match:
+                                    results.append(f"{rel_path}:{lineno}: {line.strip()}")
+                                    if len(results) >= 200:
+                                        return "\n".join(results) + "\n(Truncated, too many results)"
+                    except Exception:
+                        continue
+            return "\n".join(results) if results else "No matches found."
+        except Exception as e:
+            return f"Error: Failed to search files: {e}"
+
+    def grep_output(self, query: str) -> str:
+        """
+        Searches for a query (string or regex) inside files in the 'output' directory of the workspace.
+        """
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        if not os.path.exists(output_dir):
+            return "Error: Output directory does not exist yet."
+
+        try:
+            pattern = re.compile(query)
+        except Exception:
+            pattern = None
+
+        results = []
+        try:
+            for root, dirs, files in os.walk(output_dir):
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(file_path, self.workspace_dir)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            for lineno, line in enumerate(f, 1):
+                                match = False
+                                if pattern:
+                                    if pattern.search(line):
+                                        match = True
+                                elif query in line:
+                                    match = True
+
+                                if match:
+                                    results.append(f"{rel_path}:{lineno}: {line.strip()}")
+                                    if len(results) >= 200:
+                                        return "\n".join(results) + "\n(Truncated, too many results)"
+                    except Exception:
+                        continue
+            return "\n".join(results) if results else "No matches found in output folder."
+        except Exception as e:
+            return f"Error: Failed to grep output directory: {e}"
+
+    def edit_file(self, path: str, target: str, replacement: str) -> str:
+        """
+        Edits a file relative to workspace by replacing a target block of text with a replacement block.
+        """
+        if not is_path_safe(self.workspace_dir, path):
+            return "Error: Access Denied. Path is outside workspace."
+
+        target_file = os.path.abspath(os.path.join(self.workspace_dir, path))
+        if not os.path.exists(target_file):
+            return f"Error: File '{path}' does not exist."
+        if os.path.isdir(target_file):
+            return f"Error: Path '{path}' is a directory, not a file."
+
+        filename = os.path.basename(target_file)
+        if filename in ("task_state.json", "task_info.html"):
+            return "Error: Access Denied. Internal system file."
+
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        if not is_path_safe(output_dir, target_file):
+            return "Error: Access Denied. Edited files must be saved within the 'output' directory or its subfolders."
+
+        try:
+            with open(target_file, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            if target not in content:
+                return f"Error: Target text not found in '{path}'. Please ensure the target text matches exactly."
+
+            new_content = content.replace(target, replacement)
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            return f"Success: File '{path}' edited successfully."
+        except Exception as e:
+            return f"Error: Failed to edit file: {e}"
 
     def run_command(self, command: str) -> str:
         """

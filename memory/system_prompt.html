@@ -56,10 +56,22 @@ Available tools:
      &lt;path&gt;relative/path/to/file&lt;/path&gt;
      &lt;content&gt;file contents here&lt;/content&gt;
    &lt;/tool&gt;
-4. &lt;tool name="run_command"&gt;
+4. &lt;tool name="find_in_files"&gt;
+     &lt;path&gt;relative/path/to/dir&lt;/path&gt;
+     &lt;query&gt;search string or regex&lt;/query&gt;
+   &lt;/tool&gt;
+5. &lt;tool name="grep_output"&gt;
+     &lt;query&gt;search string or regex&lt;/query&gt;
+   &lt;/tool&gt;
+6. &lt;tool name="edit_file"&gt;
+     &lt;path&gt;relative/path/to/file&lt;/path&gt;
+     &lt;target&gt;exact text to replace&lt;/target&gt;
+     &lt;replacement&gt;replacement text&lt;/replacement&gt;
+   &lt;/tool&gt;
+7. &lt;tool name="run_command"&gt;
      &lt;command&gt;command_to_execute&lt;/command&gt;
    &lt;/tool&gt;
-5. &lt;tool name="finish_task"&gt;
+8. &lt;tool name="finish_task"&gt;
      &lt;summary&gt;description of what you accomplished&lt;/summary&gt;
    &lt;/tool&gt;
 

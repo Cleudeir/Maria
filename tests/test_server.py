@@ -168,3 +168,68 @@ def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
     assert new_state["status"] == "awaiting_intervention"
     assert new_state["proposed_tool"] is None
     assert any(err["type"] == "format_error" for err in new_state["errors_encountered"])
+    assert mock_get_generate.call_count == 8
+
+
+def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
+    state = {
+        "step": 1,
+        "mode": "auto",
+        "messages": [],
+        "errors_encountered": [],
+        "execution_log": [],
+    }
+
+    class DummyClient:
+        def __init__(self):
+            self.base_url = "http://localhost:11434"
+            self.model = "qwen3.5:4b"
+
+    client = DummyClient()
+
+    # First returns invalid, second returns valid list_dir tool call
+    responses = ["Invalid output first", "<think>Second attempt reasoning</think><tool name=\"list_dir\"><path>.</path></tool>"]
+    call_idx = 0
+
+    def mock_get_generate(system, user):
+        nonlocal call_idx
+        res = responses[call_idx]
+        call_idx += 1
+        return res
+
+    monkeypatch.setattr(server, "getGenerate", mock_get_generate)
+    new_state = server.run_llm_for_tool(state.copy(), client)
+
+    assert new_state["status"] == "running"
+    assert new_state["proposed_tool"] == {"name": "list_dir", "args": {"path": "."}, "thought": "<think>Second attempt reasoning</think>"}
+    assert len(new_state["errors_encountered"]) == 1
+    assert new_state["errors_encountered"][0]["type"] == "format_error"
+    assert call_idx == 2
+
+
+def test_get_legacy_task_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+
+    task_id = "task_20260520_074803"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+
+    # Create only task_info.html (without task_state.json)
+    html_content = """<!DOCTYPE html>
+<html>
+<body>
+    <div class="task-description">create snake game</div>
+</body>
+</html>"""
+    with open(task_path / "task_info.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    client = server.app.test_client()
+    response = client.get(f"/api/tasks/{task_id}")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["task_id"] == task_id
+    assert data["task"] == "create snake game"
+    assert data["status"] == "legacy"
+    assert "file_tree" in data

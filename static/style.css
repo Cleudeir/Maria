@@ -907,6 +907,33 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.editor-container.maximized {
+    height: calc(100% - 61px);
+}
+
+.editor-tabs {
+    display: flex;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px;
+}
+
+.editor-tabs .btn-editor {
+    background: transparent;
+    border: none;
+    padding: 4px 12px;
+    font-size: 11px;
+    border-radius: 4px;
+    transition: all var(--transition-speed);
+}
+
+.editor-tabs .btn-editor.active {
+    background: var(--color-primary);
+    color: white;
+    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
 }
 
 .editor-header {

@@ -28,7 +28,7 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
     args = {}
 
     # Extract path if relevant - match until the next '<' character to handle closing tag typos
-    if tool_name in ("list_dir", "read_file", "write_file"):
+    if tool_name in ("list_dir", "read_file", "write_file", "edit_file", "find_in_files"):
         path_match = re.search(r"<path>([^<]*)", response_text, re.IGNORECASE)
         args["path"] = path_match.group(1).strip() if path_match else ""
 
@@ -38,6 +38,25 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
             r"<content>(.*?)(?:</content>|\Z)", response_text, re.DOTALL | re.IGNORECASE
         )
         args["content"] = content_match.group(1) if content_match else ""
+
+    # Extract query if find_in_files or grep_output
+    if tool_name in ("find_in_files", "grep_output"):
+        query_match = re.search(
+            r"<query>(.*?)(?:</query>|\Z)", response_text, re.DOTALL | re.IGNORECASE
+        )
+        args["query"] = query_match.group(1).strip() if query_match else ""
+
+    # Extract target and replacement if edit_file
+    if tool_name == "edit_file":
+        target_match = re.search(
+            r"<target>(.*?)(?:</target>|\Z)", response_text, re.DOTALL | re.IGNORECASE
+        )
+        args["target"] = target_match.group(1) if target_match else ""
+
+        replacement_match = re.search(
+            r"<replacement>(.*?)(?:</replacement>|\Z)", response_text, re.DOTALL | re.IGNORECASE
+        )
+        args["replacement"] = replacement_match.group(1) if replacement_match else ""
 
     # Extract command if run_command - match until next '<' character
     if tool_name == "run_command":

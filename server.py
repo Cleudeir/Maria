@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from maria.llm import OllamaClient
 from maria.agents import parse_agent_response, MariaAgent, SelfImprovementAgent
-from maria.security import is_command_critical
+from maria.security import is_command_critical, is_path_safe
 from maria.tools import ToolExecutor, terminate_task_process_groups
 from maria.memory import (
     load_system_prompt,
@@ -171,7 +171,7 @@ def build_step_prompt(state):
         "You should output your reasoning and the next tool action in XML-like format.",
         "\n",
         "Task:\n" + task_prompt,
-        f"\nCurrent step: {state.get('step', 0) + 1} of {state.get('max_steps', 0)}.\n",
+        f"\nCurrent step: {state.get('step', 0) + 1}.\n",
     ]
 
     if state.get("step_summaries"):
@@ -609,56 +609,91 @@ def run_llm_for_tool(state, client):
     Helper function to query LLM for the next tool call during step execution.
     Handles finish_task to transition steps or stages.
     """
-    state["step"] += 1
-    try:
-        system_text, user_text = format_messages_to_prompt(state["messages"])
-        response_text = getGenerate(system_text, user_text)
-        usage = get_last_usage()
-    except Exception as e:
-        err_msg = f"LLM error: {e}"
-        state["errors_encountered"].append(
-            {"step": state["step"], "type": "llm_error", "message": err_msg}
-        )
-        state["status"] = "failed"
-        state["details"] = err_msg
-        return state
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        state["step"] += 1
+        try:
+            system_text, user_text = format_messages_to_prompt(state["messages"])
+            response_text = getGenerate(system_text, user_text)
+            usage = get_last_usage()
+        except Exception as e:
+            err_msg = f"LLM error: {e}"
+            if attempt < max_retries:
+                state["errors_encountered"].append(
+                    {
+                        "step": state["step"],
+                        "type": "llm_error",
+                        "message": f"{err_msg} (Attempt {attempt+1}/{max_retries+1}, retrying...)",
+                    }
+                )
+                time.sleep(1)
+                continue
+            else:
+                state["errors_encountered"].append(
+                    {"step": state["step"], "type": "llm_error", "message": err_msg}
+                )
+                state["status"] = "failed"
+                state["details"] = err_msg
+                return state
 
-    state["last_raw_response"] = response_text
-    assistant_entry = {
-        "step": state["step"],
-        "role": "assistant",
-        "content": response_text,
-        "ollama_usage": usage,
-    }
-    state["execution_log"].append(assistant_entry)
+        state["last_raw_response"] = response_text
+        assistant_entry = {
+            "step": state["step"],
+            "role": "assistant",
+            "content": response_text,
+            "ollama_usage": usage,
+        }
+        state["execution_log"].append(assistant_entry)
 
-    thought, tool_name, args = parse_agent_response(response_text)
+        thought, tool_name, args = parse_agent_response(response_text)
 
-    if not tool_name:
-        if thought:
-            state["messages"].append({"role": "assistant", "content": response_text})
-            state["proposed_tool"] = {"name": None, "args": {}, "thought": thought}
-            state["status"] = "awaiting_intervention"
-            return state
+        if not tool_name:
+            if thought:
+                err_msg = "Format error: You wrote a thought but did not call any tool. You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
+            else:
+                err_msg = "Format error: You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
 
-        err_msg = "Format error: You must output <think>...</think> followed by exactly one <tool name='...'>...</tool>."
-        state["errors_encountered"].append(
-            {"step": state["step"], "type": "format_error", "message": err_msg}
-        )
-        state["messages"].append({"role": "assistant", "content": response_text})
-        state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
-        state["execution_log"].append(
-            {
-                "step": state["step"],
-                "role": "tool_result",
-                "content": f"ERROR: {err_msg}",
-            }
-        )
-        state["status"] = "awaiting_intervention"
-        state["proposed_tool"] = None
-        return state
+            if attempt < max_retries:
+                state["errors_encountered"].append(
+                    {
+                        "step": state["step"],
+                        "type": "format_error",
+                        "message": f"{err_msg} (Attempt {attempt+1}/{max_retries+1}, retrying...)",
+                    }
+                )
+                state["messages"].append({"role": "assistant", "content": response_text})
+                state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
+                state["execution_log"].append(
+                    {
+                        "step": state["step"],
+                        "role": "tool_result",
+                        "content": f"ERROR: {err_msg}",
+                    }
+                )
+                continue
+            else:
+                state["errors_encountered"].append(
+                    {"step": state["step"], "type": "format_error", "message": err_msg}
+                )
+                state["messages"].append({"role": "assistant", "content": response_text})
+                state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
+                state["execution_log"].append(
+                    {
+                        "step": state["step"],
+                        "role": "tool_result",
+                        "content": f"ERROR: {err_msg}",
+                    }
+                )
+                state["status"] = "awaiting_intervention"
+                if thought:
+                    state["proposed_tool"] = {"name": None, "args": {}, "thought": thought}
+                else:
+                    state["proposed_tool"] = None
+                return state
 
-    elif tool_name == "finish_task":
+        break
+
+    if tool_name == "finish_task":
         summary = args.get("summary", "Step completed.")
         curr_idx = state["current_step_idx"]
         step_desc = state["steps"][curr_idx]
@@ -715,6 +750,14 @@ def execute_tool_call(executor, name, args):
         return executor.read_file(args.get("path", ""))
     elif name == "write_file":
         return executor.write_file(args.get("path", ""), args.get("content", ""))
+    elif name == "find_in_files":
+        return executor.find_in_files(args.get("query", ""), args.get("path", "."))
+    elif name == "grep_output":
+        return executor.grep_output(args.get("query", ""))
+    elif name == "edit_file":
+        return executor.edit_file(
+            args.get("path", ""), args.get("target", ""), args.get("replacement", "")
+        )
     elif name == "run_command":
         return executor.run_command(args.get("command", ""))
     else:
@@ -884,7 +927,6 @@ def list_tasks():
                             "task": task_desc,
                             "status": "legacy",
                             "step": 0,
-                            "max_steps": 20,
                         }
                     )
     except Exception as e:
@@ -900,7 +942,6 @@ def create_task():
     if not task_prompt:
         return jsonify({"error": "Task prompt is required"}), 400
 
-    max_steps = int(data.get("max_steps", 20))
     mode = data.get("mode", "step")  # 'step' or 'auto'
 
     # 1. Create isolated directory
@@ -938,7 +979,6 @@ def create_task():
         "status": "running" if mode == "auto" else "awaiting_intervention",
         "stage": "improving_prompt",
         "step": 0,
-        "max_steps": max_steps,
         "ollama_url": OLLAMA_URL,
         "messages": [],
         "execution_log": [
@@ -986,7 +1026,50 @@ def create_task():
 def get_task(task_id):
     state = load_task_state(task_id)
     if not state:
-        return jsonify({"error": "Task not found"}), 404
+        task_path = get_task_path(task_id)
+        if os.path.exists(task_path) and os.path.isdir(task_path):
+            info_path = os.path.join(task_path, "task_info.html")
+            task_desc = "Unknown Task"
+            created_time = task_id.replace("task_", "")
+            if os.path.exists(info_path):
+                try:
+                    with open(info_path, "r", encoding="utf-8") as f:
+                        soup = BeautifulSoup(f.read(), "html.parser")
+                        desc_div = soup.find(class_="task-description")
+                        if desc_div:
+                            task_desc = desc_div.text.strip()
+                except Exception:
+                    pass
+            state = {
+                "task_id": task_id,
+                "task": task_desc,
+                "created_at": created_time,
+                "mode": "step",
+                "status": "legacy",
+                "stage": "completed",
+                "step": 0,
+                "messages": [],
+                "execution_log": [
+                    {
+                        "step": 0,
+                        "role": "system",
+                        "content": "Legacy / CLI-started task. Workspace files are available below.",
+                    }
+                ],
+                "errors_encountered": [],
+                "proposed_tool": None,
+                "last_raw_response": None,
+                "step_summaries": [],
+                "last_tool_result": None,
+                "last_user_intervention": None,
+                "improved_prompt": None,
+                "plan": None,
+                "steps": [],
+                "current_step_idx": 0,
+                "completed_step_summaries": [],
+            }
+        else:
+            return jsonify({"error": "Task not found"}), 404
 
     # Include file tree for workspace pane
     state["file_tree"] = build_file_tree(get_task_path(task_id), get_task_path(task_id))
@@ -1100,7 +1183,7 @@ def view_task_file(task_id):
     target_file = os.path.abspath(os.path.join(task_path, path))
 
     # Security check
-    if not target_file.startswith(os.path.abspath(task_path)):
+    if not is_path_safe(task_path, target_file):
         return jsonify({"error": "Access denied"}), 403
 
     if not os.path.exists(target_file):
@@ -1112,6 +1195,13 @@ def view_task_file(task_id):
         return jsonify({"content": content})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tasks/<task_id>/files/raw/<path:filename>", methods=["GET"])
+def view_task_file_raw(task_id, filename):
+    task_path = get_task_path(task_id)
+    # Securely serve the requested file from the task directory
+    return send_from_directory(task_path, filename)
 
 
 @app.route("/api/tasks/<task_id>/files/edit", methods=["POST"])
@@ -1127,8 +1217,13 @@ def edit_task_file(task_id):
     target_file = os.path.abspath(os.path.join(task_path, path))
 
     # Security check
-    if not target_file.startswith(os.path.abspath(task_path)):
+    if not is_path_safe(task_path, target_file):
         return jsonify({"error": "Access denied"}), 403
+
+    # Output check: must be inside 'output' subdirectory
+    output_path = os.path.abspath(os.path.join(task_path, "output"))
+    if not is_path_safe(output_path, target_file):
+        return jsonify({"error": "Access denied. Files can only be saved in the 'output' directory or its subfolders."}), 403
 
     try:
         os.makedirs(os.path.dirname(target_file), exist_ok=True)

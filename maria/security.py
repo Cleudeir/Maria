@@ -17,7 +17,10 @@ def is_path_safe(base_dir: str, target_path: str) -> bool:
         abs_target = os.path.abspath(os.path.join(abs_base, target_path))
 
     # Check if the target is within the base directory
-    return abs_target.startswith(abs_base)
+    try:
+        return os.path.commonpath([abs_base, abs_target]) == abs_base
+    except ValueError:
+        return False
 
 
 def is_command_critical(cmd: str) -> bool:

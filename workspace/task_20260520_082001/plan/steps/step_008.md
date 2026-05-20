@@ -1,0 +1,5 @@
+# Step 8
+
+Approved & Executed: write_file {'path': 'snake_game/config.py', 'content': '"""\nConfiguration constants for the Snake Game.\n\nAll game parameters are defined here to allow easy configuration changes\nwithout modifying the logic code.\n"""\n\n# Screen and Grid Dimensions\nSCREEN_WIDTH = 640\nSCREEN_HEIGHT = 480\nGRID_WIDTH = 20\nGRID_HEIGHT = 15\n\n# Cell Size (pixels)\nCELL_SIZE = 30\n\n# Colors\n# Format: (R, G, B)\nCOLOR_BLACK = (0, 0, 0)\nCOLOR_WHITE = (255, 255, 255)\nCOLOR_GREEN = (0, 255, 0)\nCOLOR_GREEN_DARK = (0, 200, 0)\nCOLOR_RED = (255, 0, 0)\nCOLOR_RED_DARK = (200, 0, 0)\nCOLOR_YELLOW = (255, 255, 0)\nCOLOR_YELLOW_DARK = (200, 200, 0)\n\n# Initial Speed (ms per frame)\nINITIAL_SPEED = 100\n\n# High Score File Path\nHIGH_SCORE_FILE = "high_score.txt"\n\n# Game States\nclass GameState:\n    """Enumerated state representing game lifecycle phases."""\n    INITIALIZED = "INITIALIZED"\n    RUNNING = "RUNNING"\n    PAUSED = "PAUSED"\n    GAME_OVER = "GAME_OVER"\n'}
+
+Error: Access Denied. Output files must be saved within the 'output' directory or its subfolders.

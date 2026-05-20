@@ -133,6 +133,18 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 tool_result = executor.write_file(
                     args.get("path", ""), args.get("content", "")
                 )
+            elif tool_name == "find_in_files":
+                tool_result = executor.find_in_files(
+                    args.get("query", ""), args.get("path", ".")
+                )
+            elif tool_name == "grep_output":
+                tool_result = executor.grep_output(
+                    args.get("query", "")
+                )
+            elif tool_name == "edit_file":
+                tool_result = executor.edit_file(
+                    args.get("path", ""), args.get("target", ""), args.get("replacement", "")
+                )
             elif tool_name == "run_command":
                 tool_result = executor.run_command(args.get("command", ""))
             else:

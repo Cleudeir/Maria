@@ -88,7 +88,7 @@ async function loadTasksList() {
                 </div>
                 <div class="task-item-desc" title="${task.task}">${task.task}</div>
                 <div class="task-item-date">
-                    <span>Step: ${task.step}/${task.max_steps}</span>
+                    <span>Step: ${task.step}</span>
                     <span>${task.created_at || ""}</span>
                 </div>
             `;
@@ -173,7 +173,7 @@ async function getTaskDetails(taskId) {
     statusEl.className = `task-header-badge status-${task.status}`;
 
     document.getElementById("active-task-step").innerText =
-      `Step: ${task.step}/${task.max_steps}`;
+      `Step: ${task.step}`;
 
     // Render Execution logs
     renderExecutionLogs(task.execution_log);
@@ -305,7 +305,8 @@ function stripHtmlTags(text) {
 
 function getLogEntryKey(entry) {
   const rawContent = entry.content || "";
-  return `${entry.role || ""}|${entry.step || ""}|${rawContent.slice(0, 200)}`;
+  const stepVal = (entry.step !== undefined && entry.step !== null) ? entry.step : "";
+  return `${entry.role || ""}|${stepVal}|${rawContent.slice(0, 200)}`;
 }
 
 function renderCardBody(entry) {
@@ -388,7 +389,7 @@ function renderExecutionLogs(log) {
 
     card.innerHTML = `
             <div class="log-card-header">
-                <span>${icon} ${titleRole} (Step ${entry.step || "-"})</span>
+                <span>${icon} ${titleRole} (Step ${(entry.step !== undefined && entry.step !== null) ? entry.step : "-"})</span>
                 ${usageBadge}
             </div>
             <div class="log-card-body">
@@ -547,6 +548,18 @@ async function openFileEditor(filePath) {
     }
   });
 
+  // Reset tab behavior and preview iframe
+  const isHtml = filePath.toLowerCase().endsWith(".html") || filePath.toLowerCase().endsWith(".htm");
+  const tabsContainer = document.getElementById("editor-tabs");
+  if (isHtml) {
+    tabsContainer.style.display = "flex";
+  } else {
+    tabsContainer.style.display = "none";
+  }
+
+  // Default to code tab
+  switchEditorTab('code');
+
   try {
     const res = await fetch(
       `/api/tasks/${currentTaskId}/files/view?path=${encodeURIComponent(filePath)}`,
@@ -561,11 +574,96 @@ async function openFileEditor(filePath) {
 // Close File Editor panel
 function closeEditor() {
   editingFilePath = null;
-  document.getElementById("editor-pane").style.display = "none";
+  
+  // Reset maximized state
+  const editorPane = document.getElementById("editor-pane");
+  editorPane.style.display = "none";
+  editorPane.classList.remove("maximized");
+  
+  // Reset toggle size button icon
+  const toggleBtn = document.getElementById("btn-toggle-size");
+  if (toggleBtn) {
+    toggleBtn.innerHTML = '<i class="fa-solid fa-angles-up"></i>';
+  }
+
   document.getElementById("editor-textarea").value = "";
+  
+  const iframe = document.getElementById("editor-preview");
+  if (iframe) {
+    iframe.src = "about:blank";
+  }
 
   const treeItems = document.querySelectorAll(".tree-item");
   treeItems.forEach((el) => el.classList.remove("active"));
+}
+
+// Tab Switching logic
+function switchEditorTab(tab) {
+  const codeTab = document.getElementById("tab-code");
+  const previewTab = document.getElementById("tab-preview");
+  const textarea = document.getElementById("editor-textarea");
+  const iframe = document.getElementById("editor-preview");
+  const saveBtn = document.getElementById("btn-save-code");
+  const fsBtn = document.getElementById("btn-fullscreen-preview");
+  const openBtn = document.getElementById("btn-new-tab-preview");
+
+  if (tab === "preview") {
+    codeTab.classList.remove("active");
+    previewTab.classList.add("active");
+    textarea.style.display = "none";
+    iframe.style.display = "block";
+    saveBtn.style.display = "none";
+    fsBtn.style.display = "flex";
+    openBtn.style.display = "flex";
+
+    // Set src to the new raw endpoint to reload page
+    if (currentTaskId && editingFilePath) {
+      iframe.src = `/api/tasks/${currentTaskId}/files/raw/${editingFilePath}`;
+    }
+  } else {
+    codeTab.classList.add("active");
+    previewTab.classList.remove("active");
+    textarea.style.display = "block";
+    iframe.style.display = "none";
+    saveBtn.style.display = "flex";
+    fsBtn.style.display = "none";
+    openBtn.style.display = "none";
+  }
+}
+
+// Toggle Editor Height inside the workspace column
+function toggleEditorSize() {
+  const editorPane = document.getElementById("editor-pane");
+  const toggleBtn = document.getElementById("btn-toggle-size");
+  if (!editorPane || !toggleBtn) return;
+
+  const isMaximized = editorPane.classList.toggle("maximized");
+  if (isMaximized) {
+    toggleBtn.innerHTML = '<i class="fa-solid fa-angles-down"></i>';
+  } else {
+    toggleBtn.innerHTML = '<i class="fa-solid fa-angles-up"></i>';
+  }
+}
+
+// Fullscreen Iframe Preview (standard browser Fullscreen API)
+function fullscreenPreview() {
+  const iframe = document.getElementById("editor-preview");
+  if (!iframe) return;
+
+  if (iframe.requestFullscreen) {
+    iframe.requestFullscreen();
+  } else if (iframe.webkitRequestFullscreen) { /* Safari */
+    iframe.webkitRequestFullscreen();
+  } else if (iframe.msRequestFullscreen) { /* IE11 */
+    iframe.msRequestFullscreen();
+  }
+}
+
+// Open HTML file in standalone new browser tab
+function openPreviewInNewTab() {
+  if (currentTaskId && editingFilePath) {
+    window.open(`/api/tasks/${currentTaskId}/files/raw/${editingFilePath}`, '_blank');
+  }
 }
 
 // Save file edit content
@@ -692,7 +790,6 @@ async function submitNewTask() {
     alert("Please write a task description.");
     return;
   }
-  const steps = parseInt(document.getElementById("new-task-steps").value) || 20;
   const mode = document.getElementById("new-task-mode").value;
 
   closeModals();
@@ -701,7 +798,7 @@ async function submitNewTask() {
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task: taskText, max_steps: steps, mode: mode }),
+      body: JSON.stringify({ task: taskText, mode: mode }),
     });
     const task = await res.json();
 

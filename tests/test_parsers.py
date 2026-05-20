@@ -120,3 +120,53 @@ def test_parse_self_improvement_response():
         == "Always execute tests via .venv/bin/pytest or run pip install pytest first."
     )
     assert prompt == "You are Maria. You must always use TDD."
+
+
+def test_parse_new_tools():
+    # find_in_files
+    response = """
+    Let's find occurrences of config in workspace.
+    <tool name="find_in_files">
+      <path>src/</path>
+      <query>config</query>
+    </tool>
+    """
+    thought, tool, args = parse_agent_response(response)
+    assert thought == "Let's find occurrences of config in workspace."
+    assert tool == "find_in_files"
+    assert args["path"] == "src/"
+    assert args["query"] == "config"
+
+    # grep_output
+    response2 = """
+    Let's grep output.
+    <tool name="grep_output">
+      <query>game_state</query>
+    </tool>
+    """
+    thought2, tool2, args2 = parse_agent_response(response2)
+    assert thought2 == "Let's grep output."
+    assert tool2 == "grep_output"
+    assert args2["query"] == "game_state"
+
+    # edit_file
+    response3 = """
+    Let's edit the file.
+    <tool name="edit_file">
+      <path>output/test.py</path>
+      <target>
+def old_function():
+    return True
+      </target>
+      <replacement>
+def new_function():
+    return False
+      </replacement>
+    </tool>
+    """
+    thought3, tool3, args3 = parse_agent_response(response3)
+    assert thought3 == "Let's edit the file."
+    assert tool3 == "edit_file"
+    assert args3["path"] == "output/test.py"
+    assert "\ndef old_function():\n    return True\n      " in args3["target"]
+    assert "\ndef new_function():\n    return False\n      " in args3["replacement"]

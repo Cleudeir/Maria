@@ -102,7 +102,7 @@
                     <div class="task-header-title" id="active-task-desc">Task description goes here...</div>
                     <div class="task-header-meta">
                         <span class="task-header-badge" id="active-task-status">Awaiting Intervention</span>
-                        <span class="task-header-step" id="active-task-step">Step: 4/20</span>
+                        <span class="task-header-step" id="active-task-step">Step: 4</span>
                     </div>
                 </div>
                 
@@ -175,13 +175,23 @@
                     <!-- File editor view -->
                     <div class="editor-container" id="editor-pane" style="display: none;">
                         <div class="editor-header">
-                            <span class="editor-filename" id="editor-filename">untitled.py</span>
+                            <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
+                                <span class="editor-filename" id="editor-filename" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">untitled.py</span>
+                                <div class="editor-tabs" id="editor-tabs" style="display: none; gap: 4px; flex-shrink: 0;">
+                                    <button class="btn-editor active" id="tab-code" onclick="switchEditorTab('code')">Code</button>
+                                    <button class="btn-editor" id="tab-preview" onclick="switchEditorTab('preview')">Preview</button>
+                                </div>
+                            </div>
                             <div class="editor-actions">
+                                <button class="btn-editor" id="btn-toggle-size" onclick="toggleEditorSize()" title="Maximize / Minimize"><i class="fa-solid fa-angles-up"></i></button>
+                                <button class="btn-editor" id="btn-fullscreen-preview" style="display: none;" onclick="fullscreenPreview()" title="Browser Fullscreen"><i class="fa-solid fa-maximize"></i> Fullscreen</button>
+                                <button class="btn-editor" id="btn-new-tab-preview" style="display: none;" onclick="openPreviewInNewTab()" title="Open in New Tab"><i class="fa-solid fa-up-right-from-square"></i> Open</button>
                                 <button class="btn-editor" onclick="closeEditor()">Cancel</button>
-                                <button class="btn-editor btn-editor-save" onclick="saveEditorContent()">Save</button>
+                                <button class="btn-editor btn-editor-save" id="btn-save-code" onclick="saveEditorContent()">Save</button>
                             </div>
                         </div>
                         <textarea class="editor-textarea" id="editor-textarea" spellcheck="false"></textarea>
+                        <iframe class="editor-preview" id="editor-preview" style="display: none; flex: 1; width: 100%; border: none; background: white;" sandbox="allow-scripts allow-same-origin"></iframe>
                     </div>
                 </div>
                 
@@ -203,18 +213,12 @@
                 <textarea class="form-textarea" id="new-task-prompt" placeholder="e.g. Write a Python function to compute the N-th prime number, write a unit test with TDD and ensure they all pass..."></textarea>
             </div>
             
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label">Max Allowed Steps</label>
-                    <input type="number" class="form-input" id="new-task-steps" value="400" min="200" max="1000">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Initial Execution Mode</label>
-                    <select class="form-select" id="new-task-mode">
-                        <option value="auto">Auto-run, approve only sensitive commands</option>
-                        <option value="step">Step-by-Step (User Approvals)</option>
-                    </select>
-                </div>
+            <div class="form-group">
+                <label class="form-label">Initial Execution Mode</label>
+                <select class="form-select" id="new-task-mode">
+                    <option value="auto">Auto-run, approve only sensitive commands</option>
+                    <option value="step">Step-by-Step (User Approvals)</option>
+                </select>
             </div>
             
             <div class="modal-footer">

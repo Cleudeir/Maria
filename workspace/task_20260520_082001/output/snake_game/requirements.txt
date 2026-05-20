@@ -1,0 +1,23 @@
+# Snake Game Dependencies
+
+# Core Game Engine
+pygame>=2.5.0
+
+# Python Version
+# Python 3.8+ required for compatibility
+
+# Optional: For better font support
+pyfont>=1.0.0
+
+# Optional: For testing
+pytest>=7.0.0
+
+# Optional: For development
+black>=23.0.0
+flake8>=6.0.0
+
+# Installation
+pip install -r requirements.txt
+
+# Development
+pip install -e .
