@@ -36,6 +36,19 @@ def test_tool_executor_write_file_restriction(tmp_path):
     assert not (workspace / "test.txt").exists()
 
 
+def test_tool_executor_run_command_uses_output_root(tmp_path):
+    workspace = tmp_path / "task_999"
+    workspace.mkdir()
+
+    executor = ToolExecutor(str(workspace))
+    (workspace / "outside.txt").write_text("outside")
+
+    res = executor.run_command("pwd")
+    assert "Success" in res
+    assert "/output" in res or "output" in res
+    assert (workspace / "output").is_dir()
+
+
 def test_server_edit_route_restriction(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
 

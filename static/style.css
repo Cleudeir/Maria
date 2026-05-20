@@ -302,6 +302,11 @@ body {
     background: rgba(239, 68, 68, 0.12);
 }
 
+.status-reviewed {
+    color: var(--color-primary);
+    background: rgba(99, 102, 241, 0.12);
+}
+
 .supervision-timestamp {
     color: var(--text-muted);
     font-size: 12px;
@@ -889,6 +894,17 @@ body {
 .btn-modify:hover {
     transform: translateY(-1px);
     box-shadow: 0 6px 16px rgba(6, 182, 212, 0.4);
+}
+
+.btn-continue {
+    background: #64748b;
+    border: none;
+    color: white;
+    box-shadow: 0 4px 12px rgba(100, 116, 139, 0.3);
+}
+.btn-continue:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(100, 116, 139, 0.4);
 }
 
 .btn-send-prompt {

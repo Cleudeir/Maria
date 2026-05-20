@@ -57,6 +57,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
         ]
 
         step_turns = 0
+        format_error_retries = 0
         step_success = False
         while step_turns < 15:  # Max 15 turns per step
             step_turns += 1
@@ -112,6 +113,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         "content": f"ERROR: {err_msg}",
                     }
                 )
+                format_error_retries += 1
+                if format_error_retries >= 10:
+                    print(
+                        "⚠️ Reached maximum format-error retry attempts for this step."
+                    )
+                    overall_success = False
+                    break
                 continue
 
             print(f"🛠️ Tool Call: {tool_name} with args: {args}")

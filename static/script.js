@@ -176,36 +176,28 @@ async function getTaskDetails(taskId) {
       `Step: ${task.step}`;
 
     const supervisorBanner = document.getElementById("supervision-banner");
-    if (task.supervision_status && task.supervision_status !== "idle") {
+    const showSupervisorPanel =
+      (task.status === "completed" || task.status === "failed") &&
+      task.supervision_status === "reviewed" &&
+      task.supervision_review_summary;
+
+    if (showSupervisorPanel) {
       const bannerTitle = document.getElementById("supervision-title");
       const statusLabel = document.getElementById("supervision-status");
       const reasonLabel = document.getElementById("supervision-reason");
       const timestampLabel = document.getElementById("supervision-timestamp");
       const extraLabel = document.getElementById("supervision-extra");
 
-      const statusText = task.supervision_status
-        .replace(/_/g, " ")
-        .toUpperCase();
-      statusLabel.innerText = statusText;
-      statusLabel.className = `supervision-pill status-${task.supervision_status}`;
+      statusLabel.innerText = "REVIEWED";
+      statusLabel.className = `supervision-pill status-reviewed`;
 
-      if (task.supervision_status === "reroute") {
-        bannerTitle.innerText = "Supervisor Rerouted the Next Step";
-      } else if (task.supervision_status === "pause") {
-        bannerTitle.innerText = "Supervisor Paused Execution";
-      } else {
-        bannerTitle.innerText = "Supervisor Approved the Action";
-      }
-
+      bannerTitle.innerText = "Supervisor Final Analysis";
       reasonLabel.innerText =
         task.supervision_reason || "No supervisor reasoning available.";
       timestampLabel.innerText = task.supervision_last_review
         ? `Reviewed: ${new Date(task.supervision_last_review).toLocaleString()}`
         : "";
-      extraLabel.innerText =
-        task.supervision_status === "reroute" && Array.isArray(task.steps)
-          ? `New active step: ${task.steps[task.current_step_idx] || "(unknown)"}`
-          : "";
+      extraLabel.innerText = task.supervision_review_summary || "";
 
       supervisorBanner.style.display = "grid";
     } else {
@@ -420,6 +412,8 @@ function renderExecutionLogs(log) {
       icon = '<i class="fa-solid fa-terminal"></i>';
     if (entry.role === "user_intervention")
       icon = '<i class="fa-solid fa-user-pen"></i>';
+    if (entry.role === "supervisor")
+      icon = '<i class="fa-solid fa-shield-halved"></i>';
 
     const usageBadge = entry.ollama_usage
       ? `<span class="log-usage-badge">${escapeHtml(formatOllamaUsage(entry.ollama_usage))}</span>`
@@ -792,6 +786,11 @@ async function submitIntervention(action) {
       return;
     }
     payload.user_prompt = userPrompt;
+  }
+
+  if (action === "continue") {
+    payload.action = "inject";
+    payload.user_prompt = "continue";
   }
 
   // Clear prompt only after a user-inject action so typed instructions are not lost during approve/modify actions.

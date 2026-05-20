@@ -315,7 +315,7 @@ class ToolExecutor:
 
     def run_command(self, command: str) -> str:
         """
-        Runs command inside workspace directory, with security controls.
+        Runs command inside the workspace output directory, with security controls.
         """
         # Command checks
         if is_command_critical(command):
@@ -323,6 +323,9 @@ class ToolExecutor:
             approved = prompt_user_approval(command)
             if not approved:
                 return "Error: Command execution rejected by user."
+
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        os.makedirs(output_dir, exist_ok=True)
 
         preexec_fn = None
         creationflags = 0
@@ -341,7 +344,7 @@ class ToolExecutor:
             process = subprocess.Popen(
                 command,
                 shell=True,
-                cwd=self.workspace_dir,
+                cwd=output_dir,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -78,7 +78,9 @@ def test_resume_auto_rejects_non_auto_mode(monkeypatch, tmp_path):
     assert data["error"] == "Task is not in auto mode"
 
 
-def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path):
+def test_background_execution_loop_runs_supervisor_review_after_completion(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
     task_id = "task_supervise"
     task_path = tmp_path / task_id
@@ -90,18 +92,14 @@ def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "mode": "auto",
         "status": "running",
-        "stage": "executing_steps",
+        "stage": "supervisor_review",
         "step": 0,
         "max_steps": 20,
         "ollama_url": server.OLLAMA_URL,
         "messages": [],
         "execution_log": [],
         "errors_encountered": [],
-        "proposed_tool": {
-            "name": "write_file",
-            "args": {"path": "danger.py", "content": "print('unsafe')"},
-            "thought": "I will write the file next.",
-        },
+        "proposed_tool": None,
         "last_raw_response": None,
         "step_summaries": [],
         "last_tool_result": None,
@@ -109,7 +107,9 @@ def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path
         "plan": "Create a safer implementation.",
         "steps": ["Write a dangerous file"],
         "current_step_idx": 0,
-        "completed_step_summaries": [],
+        "completed_step_summaries": ["Wrote initial file"],
+        "verification_report": "All files were created, but tests are missing.",
+        "verification_verdict": "FAILED",
         "supervision_status": "idle",
         "supervision_reason": None,
         "supervision_last_review": None,
@@ -117,34 +117,28 @@ def test_background_execution_loop_supervises_and_reroutes(monkeypatch, tmp_path
     }
     server.save_task_state(task_id, state)
 
-    def fake_supervise_proposed_tool(*args, **kwargs):
+    def fake_supervise_task_result(*args, **kwargs):
         return {
-            "action": "reroute",
-            "reason": "The current step is unsafe and should be rewritten.",
-            "new_step_description": "Create a secure application structure instead.",
-            "thought": "The proposed action is misaligned with the plan.",
+            "action": "review",
+            "reason": "The final result is incomplete because tests are missing.",
+            "summary": "The code is mostly there, but the task is not fully complete without tests.",
+            "thought": "I should point out the missing coverage after execution.",
             "raw_response": "",
             "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
-    def fake_run_agent_step_sync(
-        task_id_arg, action="approve", modified_tool=None, user_prompt=None
-    ):
-        current = server.load_task_state(task_id_arg)
-        current["status"] = "completed"
-        server.save_task_state(task_id_arg, current)
-        return current
-
-    monkeypatch.setattr(server, "supervise_proposed_tool", fake_supervise_proposed_tool)
-    monkeypatch.setattr(server, "run_agent_step_sync", fake_run_agent_step_sync)
+    monkeypatch.setattr(server, "supervise_task_result", fake_supervise_task_result)
     monkeypatch.setattr(server.time, "sleep", lambda _: None)
 
     server.background_execution_loop(task_id)
     new_state = server.load_task_state(task_id)
 
-    assert new_state["supervision_status"] == "reroute"
-    assert new_state["steps"][0] == "Create a secure application structure instead."
-    assert new_state["status"] == "completed"
+    assert new_state["supervision_status"] == "reviewed"
+    assert (
+        new_state["supervision_review_summary"]
+        == "The code is mostly there, but the task is not fully complete without tests."
+    )
+    assert new_state["status"] == "failed"
 
 
 def test_delete_task_stops_background_thread_and_cleans_up(monkeypatch, tmp_path):
@@ -310,6 +304,24 @@ def test_get_legacy_task_fallback(monkeypatch, tmp_path):
     assert data["task"] == "create snake game"
     assert data["status"] == "legacy"
     assert "file_tree" in data
+
+
+def test_raw_task_file_serves_file_content(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+
+    task_id = "task_raw"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+    file_path = task_path / "preview.html"
+    file_content = "<html><body><h1>Preview</h1></body></html>"
+    file_path.write_text(file_content, encoding="utf-8")
+
+    client = server.app.test_client()
+    response = client.get(f"/api/tasks/{task_id}/files/raw/preview.html")
+
+    assert response.status_code == 200
+    assert response.data.decode("utf-8") == file_content
+    assert response.headers["Content-Type"].startswith("text/html")
 
 
 def test_create_task_with_model_think(monkeypatch, tmp_path):

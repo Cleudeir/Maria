@@ -4,8 +4,16 @@ import json
 import time
 import shutil
 import threading
+import mimetypes
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    render_template,
+    send_file,
+    send_from_directory,
+)
 from bs4 import BeautifulSoup
 
 # Add current directory to path to load maria package
@@ -13,7 +21,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from maria.llm import OllamaClient
 from maria.agent import parse_agent_response, MariaAgent
-from maria.agents.supervise_execution import supervise_proposed_tool
+from maria.agents.supervise_execution import supervise_task_result
 from maria.security import is_command_critical
 from maria.tools import ToolExecutor
 from maria.memory import (
@@ -279,6 +287,12 @@ def run_agent_step_sync(
         state["last_tool_result"] = None
     if "last_user_intervention" not in state:
         state["last_user_intervention"] = None
+    if "verification_report" not in state:
+        state["verification_report"] = None
+    if "verification_verdict" not in state:
+        state["verification_verdict"] = None
+    if "supervision_review_summary" not in state:
+        state["supervision_review_summary"] = None
     if "supervision_status" not in state:
         state["supervision_status"] = "idle"
     if "supervision_reason" not in state:
@@ -583,27 +597,73 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 pass
 
             state["proposed_tool"] = None
-            if verdict == "SUCCESS":
+            state["verification_report"] = report
+            state["verification_verdict"] = verdict
+            state["stage"] = "supervisor_review"
+            state["status"] = "running"
+        except Exception as e:
+            state["status"] = "failed"
+            state["details"] = f"Failed to verify execution: {e}"
+            trigger_self_improvement(task_id, state)
+
+    elif state["stage"] == "supervisor_review":
+        try:
+            review = supervise_task_result(
+                task=state.get("task", ""),
+                plan=state.get("plan", ""),
+                steps=state.get("steps", []),
+                completed_summaries=state.get("completed_step_summaries", []),
+                verification_report=state.get("verification_report", ""),
+                verdict=state.get("verification_verdict", ""),
+            )
+            state["supervision_status"] = "reviewed"
+            state["supervision_reason"] = review["reason"]
+            state["supervision_review_summary"] = review.get("summary", "")
+            state["supervision_last_review"] = review["reviewed_at"]
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "supervisor",
+                    "content": f"Supervisor Review: {review['reason']}\n{review.get('summary', '')}",
+                }
+            )
+            state["supervision_log"].append(
+                {
+                    "timestamp": review["reviewed_at"],
+                    "action": "review",
+                    "reason": review["reason"],
+                    "summary": review.get("summary", ""),
+                    "thought": review["thought"],
+                }
+            )
+            state["proposed_tool"] = None
+            if state.get("verification_verdict") == "SUCCESS":
                 state["status"] = "completed"
-                state["details"] = report
+                state["details"] = review["reason"]
                 try:
-                    add_task_history(MEMORY_DIR, state["task"], "SUCCESS", report[:200])
+                    add_task_history(
+                        MEMORY_DIR, state["task"], "SUCCESS", review["reason"][:200]
+                    )
                 except Exception:
                     pass
             else:
                 state["status"] = "failed"
-                state["details"] = f"Verification failed. Verdict: {verdict}"
+                state["details"] = (
+                    f"Verification failed. Verdict: {state.get('verification_verdict')}\n{review['reason']}"
+                )
                 try:
                     add_task_history(
-                        MEMORY_DIR, state["task"], "FAILED", f"Verdict: {verdict}"
+                        MEMORY_DIR,
+                        state["task"],
+                        "FAILED",
+                        f"Verdict: {state.get('verification_verdict')} - {review['reason']}",
                     )
                 except Exception:
                     pass
-
             trigger_self_improvement(task_id, state)
         except Exception as e:
             state["status"] = "failed"
-            state["details"] = f"Failed to verify execution: {e}"
+            state["details"] = f"Failed to review execution: {e}"
             trigger_self_improvement(task_id, state)
 
     save_task_state(task_id, state)
@@ -615,91 +675,91 @@ def run_llm_for_tool(state, client):
     Helper function to query LLM for the next tool call during step execution.
     Handles finish_task to transition steps or stages.
     """
-    state["step"] += 1
-    try:
-        response_text = client.chat(state["messages"], temperature=0.1)
-    except Exception as e:
-        err_msg = f"LLM error: {e}"
-        state["errors_encountered"].append(
-            {"step": state["step"], "type": "llm_error", "message": err_msg}
-        )
-        state["status"] = "failed"
-        state["details"] = err_msg
-        return state
+    max_retries = 10
 
-    state["last_raw_response"] = response_text
-    state["execution_log"].append(
-        {"step": state["step"], "role": "assistant", "content": response_text}
-    )
-
-    thought, tool_name, args = parse_agent_response(response_text)
-
-    if not tool_name:
-        if thought:
-            state["messages"].append({"role": "assistant", "content": response_text})
-            state["proposed_tool"] = {"name": None, "args": {}, "thought": thought}
-            state["status"] = "awaiting_intervention"
+    for attempt in range(max_retries):
+        state["step"] += 1
+        try:
+            response_text = client.chat(state["messages"], temperature=0.1)
+        except Exception as e:
+            err_msg = f"LLM error: {e}"
+            state["errors_encountered"].append(
+                {"step": state["step"], "type": "llm_error", "message": err_msg}
+            )
+            state["status"] = "failed"
+            state["details"] = err_msg
             return state
 
-        err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
-        state["errors_encountered"].append(
-            {"step": state["step"], "type": "format_error", "message": err_msg}
-        )
-        state["messages"].append({"role": "assistant", "content": response_text})
-        state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
+        state["last_raw_response"] = response_text
         state["execution_log"].append(
-            {
-                "step": state["step"],
-                "role": "tool_result",
-                "content": f"ERROR: {err_msg}",
-            }
-        )
-        state["status"] = "awaiting_intervention"
-        state["proposed_tool"] = None
-        return state
-
-    elif tool_name == "finish_task":
-        summary = args.get("summary", "Step completed.")
-        curr_idx = state["current_step_idx"]
-        step_desc = state["steps"][curr_idx]
-        state["completed_step_summaries"].append(f"{step_desc} -> {summary}")
-        state["execution_log"].append(
-            {
-                "step": state["step"],
-                "role": "system",
-                "content": f"✅ Step {curr_idx + 1} Complete: {summary}",
-            }
+            {"step": state["step"], "role": "assistant", "content": response_text}
         )
 
-        next_idx = curr_idx + 1
-        if next_idx < len(state["steps"]):
-            state["current_step_idx"] = next_idx
-            state["proposed_tool"] = {
-                "name": "execute_step",
-                "args": {
-                    "step_num": next_idx + 1,
-                    "description": state["steps"][next_idx],
-                },
-                "thought": f"Let's begin executing step {next_idx + 1} of {len(state['steps'])}: {state['steps'][next_idx]}",
-            }
-            if state.get("mode") != "auto":
-                state["status"] = "awaiting_intervention"
-            else:
-                state["status"] = "running"
-        else:
-            state["stage"] = "verifying"
-            state["proposed_tool"] = {
-                "name": "verify_execution",
-                "args": {},
-                "thought": "All steps are completed. Let's perform the final audit and verification of all generated files.",
-            }
-            if state.get("mode") != "auto":
-                state["status"] = "awaiting_intervention"
-            else:
-                state["status"] = "running"
-        return state
+        thought, tool_name, args = parse_agent_response(response_text)
 
-    else:
+        if not tool_name:
+            err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
+            state["errors_encountered"].append(
+                {"step": state["step"], "type": "format_error", "message": err_msg}
+            )
+            state["messages"].append({"role": "assistant", "content": response_text})
+            state["messages"].append({"role": "user", "content": f"ERROR:\n{err_msg}"})
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "tool_result",
+                    "content": f"ERROR: {err_msg}",
+                }
+            )
+
+            if attempt < max_retries - 1:
+                continue
+
+            state["status"] = "awaiting_intervention"
+            state["proposed_tool"] = None
+            return state
+
+        if tool_name == "finish_task":
+            summary = args.get("summary", "Step completed.")
+            curr_idx = state["current_step_idx"]
+            step_desc = state["steps"][curr_idx]
+            state["completed_step_summaries"].append(f"{step_desc} -> {summary}")
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"✅ Step {curr_idx + 1} Complete: {summary}",
+                }
+            )
+
+            next_idx = curr_idx + 1
+            if next_idx < len(state["steps"]):
+                state["current_step_idx"] = next_idx
+                state["proposed_tool"] = {
+                    "name": "execute_step",
+                    "args": {
+                        "step_num": next_idx + 1,
+                        "description": state["steps"][next_idx],
+                    },
+                    "thought": f"Let's begin executing step {next_idx + 1} of {len(state['steps'])}: {state['steps'][next_idx]}",
+                }
+                if state.get("mode") != "auto":
+                    state["status"] = "awaiting_intervention"
+                else:
+                    state["status"] = "running"
+            else:
+                state["stage"] = "verifying"
+                state["proposed_tool"] = {
+                    "name": "verify_execution",
+                    "args": {},
+                    "thought": "All steps are completed. Let's perform the final audit and verification of all generated files.",
+                }
+                if state.get("mode") != "auto":
+                    state["status"] = "awaiting_intervention"
+                else:
+                    state["status"] = "running"
+            return state
+
         state["proposed_tool"] = {"name": tool_name, "args": args, "thought": thought}
         if state.get("mode") != "auto":
             state["status"] = "awaiting_intervention"
@@ -767,60 +827,7 @@ def background_execution_loop(task_id):
                     state["status"] = "awaiting_intervention"
                     save_task_state(task_id, state)
                     break
-
-            supervision = supervise_proposed_tool(
-                task=state.get("task", ""),
-                stage=state.get("stage", ""),
-                plan=state.get("plan", ""),
-                steps=state.get("steps", []),
-                current_step_idx=state.get("current_step_idx", 0),
-                proposed_tool=proposed_tool,
-                completed_summaries=state.get("completed_step_summaries", []),
-                last_tool_result=state.get("last_tool_result", ""),
-                last_user_intervention=state.get("last_user_intervention", ""),
-            )
-
-            state["supervision_status"] = supervision["action"]
-            state["supervision_reason"] = supervision["reason"]
-            state["supervision_last_review"] = supervision["reviewed_at"]
-            state["supervision_log"].append(
-                {
-                    "timestamp": supervision["reviewed_at"],
-                    "action": supervision["action"],
-                    "reason": supervision["reason"],
-                    "proposal": proposed_tool,
-                    "thought": supervision["thought"],
-                }
-            )
-            save_task_state(task_id, state)
-
-            if supervision["action"] == "approve":
-                state = run_agent_step_sync(task_id, action="approve")
-            elif supervision["action"] == "reroute":
-                if state.get("stage") == "executing_steps":
-                    curr_idx = state.get("current_step_idx", 0)
-                    new_desc = supervision.get("new_step_description", "").strip()
-                    if new_desc and 0 <= curr_idx < len(state.get("steps", [])):
-                        state["steps"][curr_idx] = new_desc
-                        state["plan"] = (
-                            state.get("plan", "")
-                            + f"\n\n[Supervisor rerouted step {curr_idx + 1}: {new_desc}]"
-                        )
-                    state["messages"] = []
-                    state["proposed_tool"] = None
-                    state["status"] = "running"
-                    save_task_state(task_id, state)
-                    continue
-                else:
-                    state["status"] = "awaiting_intervention"
-                    save_task_state(task_id, state)
-                    break
-            else:
-                state["status"] = "awaiting_intervention"
-                state["proposed_tool"] = None
-                save_task_state(task_id, state)
-                break
-
+            state = run_agent_step_sync(task_id, action="approve")
         else:
             state = run_agent_step_sync(task_id, action="approve")
 
@@ -1011,6 +1018,9 @@ def create_task():
         "steps": [],
         "current_step_idx": 0,
         "completed_step_summaries": [],
+        "verification_report": None,
+        "verification_verdict": None,
+        "supervision_review_summary": None,
         "supervision_status": "idle",
         "supervision_reason": None,
         "supervision_last_review": None,
@@ -1145,6 +1155,28 @@ def view_task_file(task_id):
         return jsonify({"content": content})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tasks/<task_id>/files/raw/<path:file_path>", methods=["GET"])
+def raw_task_file(task_id, file_path):
+    task_path = get_task_path(task_id)
+    target_file = os.path.abspath(os.path.join(task_path, file_path))
+
+    # Security check
+    if not target_file.startswith(os.path.abspath(task_path)):
+        return jsonify({"error": "Access denied"}), 403
+
+    if not os.path.exists(target_file):
+        return jsonify({"error": "File does not exist"}), 404
+
+    if os.path.isdir(target_file):
+        return jsonify({"error": "Path is a directory"}), 400
+
+    mime_type, _ = mimetypes.guess_type(target_file)
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    return send_file(target_file, mimetype=mime_type, as_attachment=False)
 
 
 @app.route("/api/tasks/<task_id>/files/edit", methods=["POST"])

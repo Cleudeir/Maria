@@ -11,9 +11,11 @@ module.exports = {
       env: {
         PYTHONUNBUFFERED: "1",
         FLASK_ENV: "production",
+        MARIA_SERVER: "1",
       },
       env_production: {
         DEBUG: "0",
+        MARIA_SERVER: "1",
       },
     },
   ],
