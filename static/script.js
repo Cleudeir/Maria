@@ -225,10 +225,11 @@ async function getTaskDetails(taskId) {
       const timestampLabel = document.getElementById("supervision-timestamp");
       const extraLabel = document.getElementById("supervision-extra");
 
+      const hasErrors = task.errors_encountered && task.errors_encountered.length > 0;
       statusLabel.innerText = "REVIEWED";
       statusLabel.className = `supervision-pill status-reviewed`;
 
-      bannerTitle.innerText = "Supervisor Final Analysis";
+      bannerTitle.innerText = hasErrors ? "🛡️ Supervisor agindo após erro" : "Supervisor Final Analysis";
       reasonLabel.innerText =
         task.supervision_reason || "No supervisor reasoning available.";
       timestampLabel.innerText = task.supervision_last_review
@@ -427,6 +428,11 @@ function renderExecutionLogs(log) {
       icon = '<i class="fa-solid fa-user-pen"></i>';
     if (entry.role === "supervisor")
       icon = '<i class="fa-solid fa-shield-halved"></i>';
+
+    let titleText = titleRole;
+    if (entry.role === "supervisor" && entry.content && entry.content.includes("🛡️ Supervisor agindo após erro")) {
+      titleText = '<span style="color: #cf222e;">🛡️ SUPERVISOR AGINDO APÓS ERRO</span>';
+    }
 
     const usageBadge = entry.ollama_usage
       ? `<span class="log-usage-badge">${escapeHtml(formatOllamaUsage(entry.ollama_usage))}</span>`
@@ -864,6 +870,8 @@ async function submitIntervention(action) {
   if (!currentTaskId) return;
 
   const payload = { action: action };
+  const consoleEl = document.getElementById("intervention-console");
+  const buttons = consoleEl?.querySelectorAll(".btn-intervention");
 
   if (action === "modify") {
     const toolName = document.getElementById("proposed-tool-name").innerText;
@@ -900,9 +908,11 @@ async function submitIntervention(action) {
     document.getElementById("intervention-prompt").value = "";
   }
 
+  if (buttons) {
+    buttons.forEach((btn) => (btn.disabled = true));
+  }
+
   try {
-    // Show loading indicator
-    const consoleEl = document.getElementById("intervention-console");
     consoleEl.style.opacity = "0.5";
     consoleEl.style.pointerEvents = "none";
 
@@ -911,15 +921,32 @@ async function submitIntervention(action) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const task = await res.json();
 
-    consoleEl.style.opacity = "1";
-    consoleEl.style.pointerEvents = "all";
+    if (!res.ok) {
+      let errMsg = "Request failed";
+      try {
+        const errData = await res.json();
+        errMsg = errData.error || errMsg;
+      } catch (_) {}
+      alert("Failed: " + errMsg);
+      return;
+    }
 
+    await res.json();
+
+    renderedLogEntries = {};
+    lastTaskDetailsJson = "";
     getTaskDetails(currentTaskId);
     loadTasksList();
   } catch (err) {
-    console.error(err);
+    console.error("Error submitting intervention", err);
+    alert("Error: " + err.message);
+  } finally {
+    consoleEl.style.opacity = "1";
+    consoleEl.style.pointerEvents = "all";
+    if (buttons) {
+      buttons.forEach((btn) => (btn.disabled = false));
+    }
   }
 }
 

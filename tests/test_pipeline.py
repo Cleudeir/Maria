@@ -76,8 +76,8 @@ def test_agent_run_pipeline_success(tmpdir, monkeypatch):
     
     # Mock LLM chat for executing steps
     responses = [
-        '<tool name="finish_task"><summary>Summary 1</summary></tool>',
-        '<tool name="finish_task"><summary>Summary 2</summary></tool>'
+        '{"tool": "finish_task", "args": {"summary": "Summary 1"}}',
+        '{"tool": "finish_task", "args": {"summary": "Summary 2"}}'
     ]
     mock_get_generate = MagicMock(side_effect=responses)
     monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_get_generate)

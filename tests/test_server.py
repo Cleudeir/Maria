@@ -289,7 +289,7 @@ def test_run_llm_for_tool_pauses_on_invalid_tool_format(monkeypatch):
     assert client.call_count == 10
 
     client.call_count = 0
-    client.responses = ["<think>Thinking through the next step.</think>"] * 10
+    client.responses = ['Thinking about what to do next. Let me analyze the situation.'] * 10
     new_state = server.run_llm_for_tool(state.copy(), client)
 
     assert new_state["status"] == "awaiting_intervention"
@@ -318,7 +318,7 @@ def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
             self.call_count = 0
             self.responses = [
                 "Invalid output first",
-                "<tool name=\"list_dir\"><path>.</path></tool>",
+                '{"tool": "list_dir", "args": {"path": "."}}',
             ]
 
         def chat(self, messages, temperature=0.1, stream_callback=None):
@@ -394,7 +394,7 @@ def test_task_full_lifecycle_auto_mode(monkeypatch, tmp_path):
 
     # Mock LLM for step execution
     mock_generate = MagicMock(
-        return_value='<tool name="finish_task"><summary>Test file created</summary></tool>'
+        return_value='{"tool": "finish_task", "args": {"summary": "Test file created"}}'
     )
     monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_generate)
 

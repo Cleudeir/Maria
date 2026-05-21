@@ -79,35 +79,107 @@ def _sanitize_json_string(json_str: str) -> str:
 
 def parse_agent_response(response_text: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Parses agent response to extract JSON tool calls.
+    Parses agent response to extract a single JSON tool call.
     Expected format: {"tool": "tool_name", "args": {"param1": "value1", ...}}
     Handles markdown code blocks and common LLM formatting issues.
     Returns (tool_name, args).
     """
+    calls = parse_agent_responses(response_text)
+    if calls:
+        return calls[0]
+    return "", {}
+
+
+def parse_agent_responses(response_text: str) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Parses agent response to extract ALL JSON tool calls.
+    Supports both formats:
+      1. Sequential JSON objects: {"tool": "a", ...} {"tool": "b", ...}
+      2. JSON array: [{"tool": "a", ...}, {"tool": "b", ...}]
+    Handles markdown code blocks and common LLM formatting issues.
+    Returns a list of (tool_name, args) tuples.
+    """
     if not isinstance(response_text, str):
-        return "", {}
+        return []
 
-    json_match = re.search(r'\{[^{}]*"tool"\s*:', response_text, re.DOTALL)
-    if not json_match:
-        return "", {}
+    results = []
+    text = response_text.strip()
 
-    start_idx = json_match.start()
-    json_str = _extract_json_object(response_text, start_idx)
-    
-    if not json_str:
-        return "", {}
+    # Try JSON array format first
+    array_match = re.search(r'\[\s*\{', text, re.DOTALL)
+    if array_match:
+        array_start = array_match.start()
+        brace_count = 0
+        bracket_count = 0
+        in_string = False
+        escape_next = False
+        end_idx = -1
+        for i in range(array_start, len(text)):
+            char = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == '[':
+                bracket_count += 1
+            elif char == ']':
+                bracket_count -= 1
+                if bracket_count == 0:
+                    end_idx = i + 1
+                    break
+            elif char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
 
-    json_str = _sanitize_json_string(json_str)
+        if end_idx > 0:
+            array_str = text[array_start:end_idx]
+            try:
+                data_list = json.loads(array_str)
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict):
+                            tool_name = item.get("tool", "").strip().lower()
+                            args = item.get("args", {})
+                            if tool_name:
+                                results.append((tool_name, args))
+            except json.JSONDecodeError:
+                pass
 
-    try:
-        data = json.loads(json_str)
-        tool_name = data.get("tool", "").strip().lower()
-        args = data.get("args", {})
-        if not tool_name:
-            return "", {}
-        return tool_name, args
-    except json.JSONDecodeError:
-        return "", {}
+    # If array format didn't yield results, try sequential JSON objects
+    if not results:
+        pos = 0
+        while True:
+            json_match = re.search(r'\{[^{}]*"tool"\s*:', text[pos:], re.DOTALL)
+            if not json_match:
+                break
+
+            start_idx = pos + json_match.start()
+            json_str = _extract_json_object(text, start_idx)
+            if not json_str:
+                pos = start_idx + 1
+                continue
+
+            json_str = _sanitize_json_string(json_str)
+            try:
+                data = json.loads(json_str)
+                tool_name = data.get("tool", "").strip().lower()
+                args = data.get("args", {})
+                if tool_name:
+                    results.append((tool_name, args))
+            except json.JSONDecodeError:
+                pass
+
+            pos = start_idx + len(json_str)
+
+    return results
 
 
 class MariaAgent:
@@ -465,6 +537,11 @@ Current Step: Step {step_num} of {total_steps}
 Step Description: {step_desc}
 
 Your objective is to complete ONLY this step using your tools.
+You may call multiple tools in a single response by providing them sequentially:
+{"tool": "run_command", "args": {"command": "mkdir -p output"}}
+{"tool": "write_file", "args": {"path": "output/file.txt", "content": "..."}}
+Or as a JSON array:
+[{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]
 When you believe this step is fully complete, call the 'finish_task' tool with a summary of what you did.
 """,
                 },
@@ -495,13 +572,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         "content": response_text,
                     }
                 )
-                tool_name, args = parse_agent_response(response_text)
+                tool_calls = parse_agent_responses(response_text)
 
-                if not tool_name:
+                if not tool_calls:
                     print(
                         "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                     )
-                    err_msg = 'Format error: You must output your reasoning followed by exactly one JSON tool call: {"tool": "tool_name", "args": {}}. Do not ask questions or request input.'
+                    err_msg = 'Format error: You must output your reasoning followed by one or more JSON tool calls: {"tool": "tool_name", "args": {}} or [{"tool": "a", "args": {}}, {"tool": "b", "args": {}}]. Do not ask questions or request input.'
                     self.errors_encountered.append(
                         {"step": step_num, "type": "format_error", "message": err_msg}
                     )
@@ -527,56 +604,77 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         break
                     continue
 
-                print(f"🛠️ Tool Call: {tool_name} with args: {args}")
+                # Execute all tool calls sequentially
+                all_results = []
+                stop_after_tools = False
+                for tool_name, args in tool_calls:
+                    print(f"🛠️ Tool Call: {tool_name} with args: {args}")
 
-                if tool_name == "finish_task":
-                    step_success = True
-                    summary = args.get("summary", "Step completed.")
-                    completed_step_summaries.append(f"{step_desc} -> {summary}")
-                    print(f"✅ Step {step_num} finished: {summary}")
-                    break
+                    if tool_name == "finish_task":
+                        step_success = True
+                        summary = args.get("summary", "Step completed.")
+                        completed_step_summaries.append(f"{step_desc} -> {summary}")
+                        print(f"✅ Step {step_num} finished: {summary}")
+                        stop_after_tools = True
+                        all_results.append(f"[finish_task] {summary}")
+                        break
 
-                # Execute tool
-                tool_result = ""
-                if tool_name == "list_dir":
-                    tool_result = self.executor.list_dir(args.get("path", "."))
-                elif tool_name == "read_file":
-                    tool_result = self.executor.read_file(args.get("path", ""))
-                elif tool_name == "write_file":
-                    tool_result = self.executor.write_file(
-                        args.get("path", ""), args.get("content", "")
-                    )
-                elif tool_name == "run_command":
-                    tool_result = self.executor.run_command(args.get("command", ""))
-                else:
-                    tool_result = f"Error: Tool '{tool_name}' is not supported."
+                    # Execute tool
+                    tool_result = ""
+                    if tool_name == "list_dir":
+                        tool_result = self.executor.list_dir(args.get("path", "."))
+                    elif tool_name == "read_file":
+                        tool_result = self.executor.read_file(args.get("path", ""))
+                    elif tool_name == "write_file":
+                        tool_result = self.executor.write_file(
+                            args.get("path", ""), args.get("content", "")
+                        )
+                    elif tool_name == "run_command":
+                        tool_result = self.executor.run_command(args.get("command", ""))
+                    else:
+                        tool_result = f"Error: Tool '{tool_name}' is not supported."
 
-                if tool_result.startswith("Error:"):
-                    print(f"❌ Tool Execution Error:\n{tool_result}")
-                    self.errors_encountered.append(
-                        {
-                            "step": step_num,
-                            "tool": tool_name,
-                            "args": args,
-                            "error": tool_result,
-                        }
-                    )
-                else:
-                    print(
-                        f"🔍 Tool Result:\n{tool_result[:300] + '...' if len(tool_result) > 300 else tool_result}"
-                    )
+                    if tool_result.startswith("Error:"):
+                        print(f"❌ Tool Execution Error:\n{tool_result}")
+                        self.errors_encountered.append(
+                            {
+                                "step": step_num,
+                                "tool": tool_name,
+                                "args": args,
+                                "error": tool_result,
+                            }
+                        )
+                        if "Invalid path. Please specify a file path under the output directory" in tool_result:
+                            tool_result = (
+                                f"{tool_result}\n\n"
+                                f"⚠️ CRITICAL: Do NOT repeat this mistake! "
+                                f"You called '{tool_name}' with an empty or invalid path (path='{args.get('path', '')}'). "
+                                f"Always specify a valid file path like 'output/filename.ext' or just 'filename.ext'. "
+                                f"Never use empty string, '.', or './' as the path.\n\n"
+                                f"Current Step {step_num} instruction: {step_desc}"
+                            )
+                    else:
+                        print(
+                            f"🔍 Tool Result:\n{tool_result[:300] + '...' if len(tool_result) > 300 else tool_result}"
+                        )
 
+                    all_results.append(f"[{tool_name}] {tool_result}")
+
+                combined_result = "\n---\n".join(all_results)
                 step_messages.append({"role": "assistant", "content": response_text})
                 step_messages.append(
-                    {"role": "user", "content": f"TOOL RESULT:\n{tool_result}"}
+                    {"role": "user", "content": f"TOOL RESULTS:\n{combined_result}"}
                 )
                 self.execution_log.append(
                     {
                         "step": len(self.execution_log),
                         "role": "tool_result",
-                        "content": tool_result,
+                        "content": combined_result,
                     }
                 )
+
+                if stop_after_tools:
+                    break
 
             if not step_success:
                 print(f"⚠️ Step {step_num} did not finish successfully or timed out.")

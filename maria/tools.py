@@ -85,11 +85,22 @@ class ToolExecutor:
         os.makedirs(self.workspace_dir, exist_ok=True)
         os.makedirs(os.path.join(self.workspace_dir, "output"), exist_ok=True)
 
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        """
+        Normalize a path by converting absolute-looking paths (starting with '/')
+        to relative paths (starting with './').
+        """
+        if path.startswith("/") and not path.startswith("//"):
+            return "." + path
+        return path
+
     def _resolve_output_path(self, path: str) -> tuple[str, str | None]:
         """
         Resolve a relative path under the workspace output directory.
         Returns (absolute_path, error_message).
         """
+        path = self._normalize_path(path)
         if os.path.isabs(path):
             return "", "Error: Access Denied. Absolute paths are not allowed."
 
@@ -122,8 +133,9 @@ class ToolExecutor:
             return "Error: Access Denied. Path is outside output directory."
         if not os.path.exists(target_dir):
             if target_dir == output_dir:
-                return "Error: Output directory does not exist yet."
-            return f"Error: Path '{path}' does not exist."
+                os.makedirs(output_dir, exist_ok=True)
+            else:
+                return f"Error: Path '{path}' does not exist."
         if not os.path.isdir(target_dir):
             return f"Error: Path '{path}' is not a directory."
 
@@ -182,6 +194,7 @@ class ToolExecutor:
         """
         Writes content to a file in the workspace output directory.
         """
+        path = self._normalize_path(path)
         if os.path.isabs(path):
             return "Error: Access Denied. Absolute paths are not allowed."
 

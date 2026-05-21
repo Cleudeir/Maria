@@ -173,9 +173,8 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 )
                 tool_result += (
                     f"\n\nADVICE: The tool execution failed. "
-                    f"Check the error above and try a different approach. "
-                    f"If a file does not exist, create it first. "
-                    f"If a directory is missing, use run_command with mkdir. "
+                    f"Check the error and path and try a different approach. "
+                    f"If a file does not exist, create it first with write_file (parent dirs are auto-created). "
                     f"Review what went wrong and correct your approach."
                 )
             else:

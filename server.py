@@ -3,8 +3,7 @@ import sys
 import json
 import time
 import shutil
-import signal
-import atexit
+
 import threading
 import mimetypes
 import logging
@@ -130,9 +129,17 @@ def save_task_state(task_id, state):
             except Exception:
                 pass
         tmp_path = path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, path)
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+            if os.path.exists(tmp_path):
+                os.replace(tmp_path, path)
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2, ensure_ascii=False)
+        except Exception:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
 
 
 def format_task_prompt(prompt):
@@ -660,6 +667,7 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
             )
             state["last_tool_result"] = None
             state["last_user_intervention"] = None
+            state["_recent_tool_calls"] = []
 
             # Get first tool proposal
             state = run_llm_for_tool(state, client)
@@ -721,9 +729,8 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 if tool_result.startswith("Error:"):
                     tool_content += (
                         f"\n\nADVICE: The tool execution failed. "
-                        f"Check the error above and try a different approach. "
-                        f"If a file does not exist, create it first. "
-                        f"If a directory is missing, use run_command with mkdir. "
+                        f"Check the error and path and try a different approach. "
+                        f"If a file does not exist, create it first with write_file (parent dirs are auto-created). "
                         f"Review what went wrong and correct your approach."
                     )
                 state["messages"].append(
@@ -806,6 +813,7 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 verification_report=state.get("verification_report", ""),
                 verdict=state.get("verification_verdict", ""),
             )
+            has_errors = len(state.get("errors_encountered", [])) > 0
             state["supervision_status"] = "reviewed"
             state["supervision_reason"] = review["reason"]
             state["supervision_review_summary"] = review.get("summary", "")
@@ -814,7 +822,7 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 {
                     "step": state["step"],
                     "role": "supervisor",
-                    "content": f"Supervisor Review: {review['reason']}\n{review.get('summary', '')}",
+                    "content": f"🛡️ Supervisor agindo após {'erro' if has_errors else 'conclusão'}\n\nSupervisor Review: {review['reason']}\n{review.get('summary', '')}",
                 }
             )
             state["supervision_log"].append(
@@ -881,6 +889,11 @@ def run_llm_for_tool(state, client):
     Handles finish_task to transition steps or stages.
     """
     max_retries = 10
+
+    # Loop detection: track recent tool calls to detect repeated patterns
+    if "_recent_tool_calls" not in state:
+        state["_recent_tool_calls"] = []
+    recent_tool_calls = state["_recent_tool_calls"]
 
     for attempt in range(max_retries):
         state["step"] += 1
@@ -957,6 +970,67 @@ def run_llm_for_tool(state, client):
 
         tool_name, args = parse_agent_response(response_text)
 
+        # Loop detection: check if same tool call is being repeated
+        if tool_name:
+            call_signature = f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+            recent_tool_calls.append(call_signature)
+
+            # Keep only last 5 calls for comparison
+            if len(recent_tool_calls) > 5:
+                recent_tool_calls.pop(0)
+
+            # Check for repeated pattern (3+ identical consecutive calls)
+            if len(recent_tool_calls) >= 3:
+                last_three = recent_tool_calls[-3:]
+                if last_three[0] == last_three[1] == last_three[2]:
+                    curr_idx = state.get("current_step_idx", 0)
+                    step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+                    force_finish_msg = (
+                        f"CRITICAL LOOP DETECTED: You have called '{tool_name}' with the same arguments 3 times in a row "
+                        f"without making progress. This is a loop.\n\n"
+                        f"You MUST stop making tool calls and immediately call finish_task:\n"
+                        f'{{"tool": "finish_task", "args": {{"summary": "Completed step: {step_desc}"}}}}\n\n'
+                        f"If you keep calling the same tool, you will never complete the task. "
+                        f"Call finish_task NOW."
+                    )
+                    state["messages"].append({"role": "user", "content": force_finish_msg})
+                    state["execution_log"].append(
+                        {
+                            "step": state["step"],
+                            "role": "tool_result",
+                            "content": f"LOOP DETECTED: Forced finish_task guidance injected.",
+                        }
+                    )
+                    recent_tool_calls.clear()
+                    continue
+
+            # Also detect if no finish_task after 5 tool calls in same step
+            non_finish_calls = [c for c in recent_tool_calls if not c.startswith("finish_task:")]
+            if len(non_finish_calls) >= 5:
+                # Check if any file writing actually happened
+                write_calls = [c for c in non_finish_calls if c.startswith("write_file:") or c.startswith("edit_file:")]
+                if len(write_calls) == 0 and len(non_finish_calls) >= 6:
+                    curr_idx = state.get("current_step_idx", 0)
+                    step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+                    nudge_msg = (
+                        f"WARNING: You have made {len(non_finish_calls)} tool calls without writing any files "
+                        f"or calling finish_task. You are likely stuck in an analysis loop.\n\n"
+                        f"CURRENT STEP: {step_desc}\n\n"
+                        f"If you have enough information, start implementing by calling write_file or edit_file. "
+                        f"If the step is already complete, call finish_task immediately."
+                    )
+                    state["messages"].append({"role": "user", "content": nudge_msg})
+                    state["execution_log"].append(
+                        {
+                            "step": state["step"],
+                            "role": "tool_result",
+                            "content": f"WARNING: Analysis loop detected - nudging toward implementation.",
+                        }
+                    )
+        else:
+            # No valid tool call - reset recent calls tracking
+            recent_tool_calls.clear()
+
         if not tool_name:
             curr_idx = state.get("current_step_idx", 0)
             step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
@@ -991,6 +1065,7 @@ def run_llm_for_tool(state, client):
             return state
 
         if tool_name == "finish_task":
+            recent_tool_calls.clear()
             summary = args.get("summary", "Step completed.")
             curr_idx = state["current_step_idx"]
             step_desc = state["steps"][curr_idx]
@@ -1047,6 +1122,18 @@ def execute_tool_call(executor, name, args):
         return executor.read_file(args.get("path", ""))
     elif name == "write_file":
         return executor.write_file(args.get("path", ""), args.get("content", ""))
+    elif name == "edit_file":
+        return executor.edit_file(
+            args.get("path", ""),
+            args.get("target", ""),
+            args.get("replacement", ""),
+        )
+    elif name == "find_in_files":
+        return executor.find_in_files(
+            args.get("query", ""), args.get("path", ".")
+        )
+    elif name == "grep_output":
+        return executor.grep_output(args.get("query", ""))
     elif name == "run_command":
         return executor.run_command(args.get("command", ""))
     else:
@@ -1406,10 +1493,6 @@ def post_task_action(task_id):
         status = data.get("status", "completed")
         reason = data.get("reason", "Manually finished by user.")
 
-        state["status"] = status
-        state["details"] = reason
-        state["proposed_tool"] = None
-
         state["execution_log"].append(
             {
                 "step": state.get("step", 0) + 1,
@@ -1417,6 +1500,41 @@ def post_task_action(task_id):
                 "content": f"🏁 Task manually marked as {status.upper()}: {reason}",
             }
         )
+
+        try:
+            review = supervise_task_result(
+                task=state.get("task", ""),
+                plan=state.get("plan", ""),
+                steps=state.get("steps", []),
+                completed_summaries=state.get("completed_step_summaries", []),
+                verification_report=state.get("verification_report", "") or reason,
+                verdict="SUCCESS" if status == "completed" else "FAILED",
+            )
+            state["supervision_status"] = "reviewed"
+            state["supervision_reason"] = review["reason"]
+            state["supervision_review_summary"] = review.get("summary", "")
+            state["supervision_last_review"] = review["reviewed_at"]
+            state["execution_log"].append(
+                {
+                    "step": state.get("step", 0) + 2,
+                    "role": "supervisor",
+                    "content": f"🛡️ Supervisor agindo (force_complete)\n\nSupervisor Review: {review['reason']}\n{review.get('summary', '')}",
+                }
+            )
+            state["supervision_log"].append(
+                {
+                    "timestamp": review["reviewed_at"],
+                    "action": "review",
+                    "reason": review["reason"],
+                    "summary": review.get("summary", ""),
+                }
+            )
+        except Exception:
+            pass
+
+        state["status"] = status
+        state["details"] = reason
+        state["proposed_tool"] = None
 
         try:
             outcome = "SUCCESS" if status == "completed" else "FAILED"
@@ -1577,6 +1695,13 @@ def restart_task(task_id):
             "content": "🔄 Task restarted by user.",
         }
     )
+
+    # Remove the old state file so save_task_state's override logic
+    # (which forces status back to the on-disk value for completed/failed tasks)
+    # does not undo the status reset.
+    task_state_file = os.path.join(get_task_path(task_id), "task_state.json")
+    if os.path.exists(task_state_file):
+        os.remove(task_state_file)
 
     save_task_state(task_id, state)
 
@@ -1890,46 +2015,7 @@ def _start_background_thread(task_id):
     active_threads[task_id] = thread
 
 
-def shutdown_handler(signum=None, frame=None):
-    """Gracefully mark all active tasks as interrupted on shutdown."""
-    print("\n[Shutdown] Shutting down gracefully...", flush=True)
-    try:
-        for folder in os.listdir(WORKSPACE_DIR):
-            if not folder.startswith("task_") or not os.path.isdir(
-                os.path.join(WORKSPACE_DIR, folder)
-            ):
-                continue
-            try:
-                state = load_task_state(folder)
-                if not state:
-                    continue
-                status = state.get("status")
-                if status in ("running", "processando"):
-                    task_id = state.get("task_id", folder)
-                    print(
-                        f"[Shutdown] Marking task {task_id} as interrupted (status: {status})",
-                        flush=True,
-                    )
-                    state["is_streaming"] = False
-                    state["status"] = "failed"
-                    state["details"] = (
-                        "Task was interrupted by server shutdown. "
-                        "Please review and restart the task manually."
-                    )
-                    save_task_state(task_id, state)
-            except Exception as e:
-                print(
-                    f"[Shutdown] Error marking task in folder {folder}: {e}",
-                    flush=True,
-                )
-    except Exception as e:
-        print(f"[Shutdown] Error during shutdown cleanup: {e}", flush=True)
 
-
-if not os.environ.get("MARIA_CLI"):
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
-    atexit.register(shutdown_handler)
 
 if __name__ == "__main__":
     # Disable debug/reloader when running in production or under PM2.
@@ -1941,4 +2027,4 @@ if __name__ == "__main__":
     # Resume any tasks that were left incomplete before starting Flask
     resume_incomplete_tasks()
 
-    app.run(host="0.0.0.0", port=5002, debug=debug_mode, use_reloader=False)
+    app.run(host="0.0.0.0", port=10001, debug=debug_mode, use_reloader=False)

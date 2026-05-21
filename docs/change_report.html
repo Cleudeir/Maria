@@ -129,6 +129,14 @@
 
         <h2>Solution</h2>
         <p>Added try-except error handling to both <code>supervise_proposed_tool()</code> and <code>supervise_task_result()</code> functions. When the supervisor fails, the system auto-approves/auto-reviews to continue execution instead of crashing.</p>
+        
+        <h2>Novo: Indicador "Supervisor agindo após erro"</h2>
+        <p>Agora quando o supervisor atua após erros na task, o log de execução mostra <strong>"🛡️ Supervisor agindo após erro"</strong> no lugar de "Supervisor Review".</p>
+        <ul>
+            <li><strong>server.py:</strong> Adiciona "🛡️ Supervisor agindo após erro" no log quando <code>errors_encountered</code> não está vazio</li>
+            <li><strong>static/script.js:</strong> Exibe "🛡️ SUPERVISOR AGINDO APÓS ERRO" no card de log e "🛡️ Supervisor agindo após erro" no banner do supervisor quando a task teve erros</li>
+            <li><strong>maria/agents/supervise_execution.py:</strong> Provider alterado de <code>OllamaProvider</code> para <code>OpenCodeProvider</code> (DeepSeek v4 Flash)</li>
+        </ul>
 
         <h2>Flow Diagram</h2>
         <div class="flow">
@@ -152,7 +160,15 @@
             <tbody>
                 <tr>
                     <td><code>maria/agents/supervise_execution.py</code></td>
-                    <td>Added try-except blocks to <code>supervise_proposed_tool()</code> and <code>supervise_task_result()</code> with auto-approve/auto-review fallback</td>
+                    <td>Added try-except blocks with auto-approve/auto-review fallback. Provider trocado para OpenCodeProvider (DeepSeek v4 Flash)</td>
+                </tr>
+                <tr>
+                    <td><code>server.py</code></td>
+                    <td>Adicionado "🛡️ Supervisor agindo após erro" no log quando há erros na task</td>
+                </tr>
+                <tr>
+                    <td><code>static/script.js</code></td>
+                    <td>Exibe "🛡️ SUPERVISOR AGINDO APÓS ERRO" no card de log e banner do supervisor</td>
                 </tr>
                 <tr>
                     <td><code>tests/test_supervise_execution.py</code></td>
