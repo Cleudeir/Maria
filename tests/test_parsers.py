@@ -15,14 +15,13 @@ def factorial(n):
       </content>
     </tool>
     """
-    thought, tool, args = parse_agent_response(response)
-    assert thought == "I need to write a python file to compute factorial."
+    tool, args = parse_agent_response(response)
     assert tool == "write_file"
     assert args["path"] == "math_utils.py"
     # Verify that the < and > signs inside the python code are preserved and not mangled by XML parsing
     assert "if n < 2:" in args["content"]
 
-    # 1b. Standard write_file with plain thought
+    # 1b. Standard write_file
     response_plain = """
     I need to write a python file to compute factorial.
     <tool name="write_file">
@@ -35,8 +34,7 @@ def factorial(n):
       </content>
     </tool>
     """
-    thought, tool, args = parse_agent_response(response_plain)
-    assert thought == "I need to write a python file to compute factorial."
+    tool, args = parse_agent_response(response_plain)
     assert tool == "write_file"
     assert args["path"] == "math_utils.py"
     assert "if n < 2:" in args["content"]
@@ -48,8 +46,7 @@ def factorial(n):
       <command>pytest tests/</command>
     </tool>
     """
-    thought, tool, args = parse_agent_response(response2)
-    assert thought == "Let's run tests"
+    tool, args = parse_agent_response(response2)
     assert tool == "run_command"
     assert args["command"] == "pytest tests/"
 
@@ -60,8 +57,7 @@ def factorial(n):
       <summary>Calculator module created.</summary>
     </TOOL>
     """
-    thought, tool, args = parse_agent_response(response3)
-    assert thought == "All tests passed."
+    tool, args = parse_agent_response(response3)
     assert tool == "finish_task"
     assert args["summary"] == "Calculator module created."
 
@@ -73,8 +69,7 @@ def factorial(n):
       <content>print("game")</content>
     </tool>
     """
-    thought, tool, args = parse_agent_response(response4)
-    assert thought == "Let's write a file."
+    tool, args = parse_agent_response(response4)
     assert tool == "write_file"
     assert args["path"] == "test_game.py"
     assert args["content"] == 'print("game")'
@@ -83,7 +78,7 @@ def factorial(n):
 def test_is_llm_response():
     from maria.agents import is_llm_response
 
-    assert is_llm_response("<thought>Hello</thought><tool name='finish_task'></tool>")
+    assert is_llm_response("<tool name='finish_task'></tool>")
     assert is_llm_response('<tool name="read_file">')
     assert not is_llm_response("Just plain text without XML tags.")
     assert not is_llm_response("")
@@ -131,8 +126,7 @@ def test_parse_new_tools():
       <query>config</query>
     </tool>
     """
-    thought, tool, args = parse_agent_response(response)
-    assert thought == "Let's find occurrences of config in workspace."
+    tool, args = parse_agent_response(response)
     assert tool == "find_in_files"
     assert args["path"] == "src/"
     assert args["query"] == "config"
@@ -144,8 +138,7 @@ def test_parse_new_tools():
       <query>game_state</query>
     </tool>
     """
-    thought2, tool2, args2 = parse_agent_response(response2)
-    assert thought2 == "Let's grep output."
+    tool2, args2 = parse_agent_response(response2)
     assert tool2 == "grep_output"
     assert args2["query"] == "game_state"
 
@@ -164,8 +157,7 @@ def new_function():
       </replacement>
     </tool>
     """
-    thought3, tool3, args3 = parse_agent_response(response3)
-    assert thought3 == "Let's edit the file."
+    tool3, args3 = parse_agent_response(response3)
     assert tool3 == "edit_file"
     assert args3["path"] == "output/test.py"
     assert "\ndef old_function():\n    return True\n      " in args3["target"]
@@ -177,14 +169,12 @@ def test_parse_agent_response_self_closing():
     I need to read the index.html file.
     <tool name="read_file" path="output/index.html" />
     """
-    thought, tool, args = parse_agent_response(response)
-    assert thought == "I need to read the index.html file."
+    tool, args = parse_agent_response(response)
     assert tool == "read_file"
     assert args["path"] == "output/index.html"
 
     # Test with single quotes and extra spacing/no spaces
     response2 = "Check dir <tool name='list_dir' path='.'/>"
-    thought2, tool2, args2 = parse_agent_response(response2)
-    assert thought2 == "Check dir"
+    tool2, args2 = parse_agent_response(response2)
     assert tool2 == "list_dir"
     assert args2["path"] == "."

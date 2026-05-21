@@ -9,8 +9,8 @@ def test_parse_compacted_lessons_response():
     <compacted_lessons>
       <lesson>
         <title>Resilient XML Parsing</title>
-        <error>Format error: missing thought or closing tags</error>
-        <resolution>Always start with a thought block and properly open/close tags.</resolution>
+        <error>Format error: missing tool call or unclosed tags</error>
+        <resolution>Always output a valid tool call with properly opened and closed tags.</resolution>
       </lesson>
       <lesson>
         <title>TDD Compliance</title>
@@ -22,8 +22,8 @@ def test_parse_compacted_lessons_response():
     lessons = parse_compacted_lessons_response(response)
     assert len(lessons) == 2
     assert lessons[0]["title"] == "Resilient XML Parsing"
-    assert lessons[0]["error"] == "Format error: missing thought or closing tags"
-    assert lessons[0]["resolution"] == "Always start with a thought block and properly open/close tags."
+    assert lessons[0]["error"] == "Format error: missing tool call or unclosed tags"
+    assert lessons[0]["resolution"] == "Always output a valid tool call with properly opened and closed tags."
     
     assert lessons[1]["title"] == "TDD Compliance"
     assert lessons[1]["error"] == "Expected tests to fail, but they passed or missing tests"

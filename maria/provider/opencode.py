@@ -16,11 +16,9 @@ OPENCODE_MODEL = "deepseek-v4-flash"
 def strip_thinking_process(text: str) -> str:
     if not isinstance(text, str):
         return ""
+    # Strip internal model thinking tags before extracting tool calls
     if "</think>" in text:
         parts = text.split("</think>")
-        text = parts[-1]
-    elif "</thought>" in text:
-        parts = text.split("</thought>")
         text = parts[-1]
     return text.strip()
 

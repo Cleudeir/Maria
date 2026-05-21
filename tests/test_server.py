@@ -122,7 +122,6 @@ def test_background_execution_loop_runs_supervisor_review_after_completion(
             "action": "review",
             "reason": "The final result is incomplete because tests are missing.",
             "summary": "The code is mostly there, but the task is not fully complete without tests.",
-            "thought": "I should point out the missing coverage after execution.",
             "raw_response": "",
             "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
@@ -319,7 +318,7 @@ def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
             self.call_count = 0
             self.responses = [
                 "Invalid output first",
-                "<thought>Second attempt reasoning</thought><tool name=\"list_dir\"><path>.</path></tool>",
+                "<tool name=\"list_dir\"><path>.</path></tool>",
             ]
 
         def chat(self, messages, temperature=0.1, stream_callback=None):
@@ -335,7 +334,6 @@ def test_run_llm_for_tool_retries_and_succeeds(monkeypatch):
     assert new_state["proposed_tool"] == {
         "name": "list_dir",
         "args": {"path": "."},
-        "thought": "Second attempt reasoning",
     }
     assert len(new_state["errors_encountered"]) == 1
     assert new_state["errors_encountered"][0]["type"] == "format_error"
@@ -368,6 +366,112 @@ def test_get_legacy_task_fallback(monkeypatch, tmp_path):
     assert data["task"] == "create snake game"
     assert data["status"] == "legacy"
     assert "file_tree" in data
+
+
+def test_task_full_lifecycle_auto_mode(monkeypatch, tmp_path):
+    """Complete task lifecycle through all 6 stages in auto mode"""
+    monkeypatch.setattr(server, "WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "MEMORY_DIR", str(tmp_path / "memory"))
+
+    # Set up memory files
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    prompt_html = """<!DOCTYPE html><html><body><pre id="system-prompt">System prompt</pre></body></html>"""
+    lessons_html = """<!DOCTYPE html><html><body><div id="lessons-list"></div></body></html>"""
+    with open(memory_dir / "system_prompt.html", "w", encoding="utf-8") as f:
+        f.write(prompt_html)
+    with open(memory_dir / "lessons.html", "w", encoding="utf-8") as f:
+        f.write(lessons_html)
+
+    fake_improved_prompt = "Improved: Create a test file"
+    fake_plan = "# Plan\n1. Create a test file with Hello World content"
+    fake_steps = ["Create a test file with Hello World content"]
+
+    monkeypatch.setattr(server.MariaAgent, "improve_prompt", MagicMock(return_value=fake_improved_prompt))
+    monkeypatch.setattr(server.MariaAgent, "generate_plan", MagicMock(return_value=fake_plan))
+    monkeypatch.setattr(server.MariaAgent, "create_steps", MagicMock(return_value=fake_steps))
+    monkeypatch.setattr(server.MariaAgent, "verify_execution", MagicMock(return_value=("SUCCESS", "Verified")))
+
+    # Mock LLM for step execution
+    mock_generate = MagicMock(
+        return_value='<tool name="finish_task"><summary>Test file created</summary></tool>'
+    )
+    monkeypatch.setattr("maria.provider.ollama.OllamaProvider.generate", mock_generate)
+
+    # Mock final supervisor review
+    fake_review = {
+        "action": "review",
+        "reason": "Task completed successfully after all steps.",
+        "summary": "All steps done.",
+        "raw_response": "",
+        "reviewed_at": "2026-01-01T00:00:00Z",
+    }
+    monkeypatch.setattr(server, "supervise_task_result", MagicMock(return_value=fake_review))
+    monkeypatch.setattr(server, "trigger_self_improvement", MagicMock())
+    monkeypatch.setattr(server.time, "sleep", lambda _: None)
+
+    task_id = "task_full_lifecycle"
+    task_path = tmp_path / task_id
+    task_path.mkdir()
+    os.makedirs(task_path / "output", exist_ok=True)
+
+    state = {
+        "task_id": task_id,
+        "task": "Create a test file with Hello World content",
+        "created_at": "2026-01-01 00:00:00",
+        "mode": "auto",
+        "status": "running",
+        "stage": "improving_prompt",
+        "step": 0,
+        "max_steps": 20,
+        "model_think": True,
+        "provider_type": "ollama",
+        "ollama_url": server.OLLAMA_URL,
+        "messages": [],
+        "execution_log": [],
+        "errors_encountered": [],
+        "proposed_tool": {
+            "name": "improve_prompt",
+            "args": {},
+        },
+        "last_raw_response": None,
+        "step_summaries": [],
+        "last_tool_result": None,
+        "last_user_intervention": None,
+        "improved_prompt": None,
+        "plan": None,
+        "steps": [],
+        "current_step_idx": 0,
+        "completed_step_summaries": [],
+        "current_streaming_response": "",
+        "is_streaming": False,
+        "verification_report": None,
+        "verification_verdict": None,
+        "supervision_review_summary": None,
+        "supervision_status": "idle",
+        "supervision_reason": None,
+        "supervision_last_review": None,
+        "supervision_log": [],
+    }
+    server.save_task_state(task_id, state)
+
+    server.background_execution_loop(task_id)
+
+    final_state = server.load_task_state(task_id)
+    assert final_state["status"] == "completed", f"Expected completed, got {final_state['status']}"
+    assert final_state["stage"] == "supervisor_review"
+    assert final_state["improved_prompt"] == fake_improved_prompt
+    assert final_state["plan"] == fake_plan
+    assert final_state["steps"] == fake_steps
+    assert final_state["verification_verdict"] == "SUCCESS"
+    assert final_state["supervision_status"] == "reviewed"
+    assert final_state["supervision_review_summary"] == "All steps done."
+    assert len(final_state["completed_step_summaries"]) == 1
+    assert server.MariaAgent.improve_prompt.called
+    assert server.MariaAgent.generate_plan.called
+    assert server.MariaAgent.create_steps.called
+    assert server.MariaAgent.verify_execution.called
+    assert server.supervise_task_result.called
 
 
 def test_raw_task_file_serves_file_content(monkeypatch, tmp_path):

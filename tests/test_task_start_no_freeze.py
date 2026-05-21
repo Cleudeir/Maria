@@ -41,7 +41,6 @@ def _make_full_state(task_id, mode="step", status="running", stage="improving_pr
         "proposed_tool": {
             "name": "improve_prompt",
             "args": {},
-            "thought": "Let's begin by improving the user prompt using the LLM.",
         },
         "last_raw_response": None,
         "step_summaries": [],

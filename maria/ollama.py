@@ -19,16 +19,11 @@ MODEL_THINK = True
 def strip_thinking_process(text: str) -> str:
     if not isinstance(text, str):
         return ""
-    # If the response contains </think> or </thought>, return only the text after the last occurrence
+    # Strip internal model thinking tags before extracting tool calls
     if "</think>" in text:
         parts = text.split("</think>")
         text = parts[-1]
-    elif "</thought>" in text:
-        parts = text.split("</thought>")
-        text = parts[-1]
-
-    # Strip any open <think> or <thought> tag at the start if it wasn't closed or is dangling
-    text = re.sub(r"^<(think|thought)>.*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^<think>.*$", "", text, flags=re.MULTILINE)
     return text.strip()
 
 

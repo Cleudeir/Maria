@@ -2,7 +2,6 @@ import os
 import json
 import requests
 import threading
-import re
 from typing import List, Dict, Any, Optional, Callable
 from dotenv import load_dotenv
 
@@ -16,19 +15,6 @@ class LoopDetectedError(Exception):
 _thread_local = threading.local()
 
 load_dotenv()
-
-
-def strip_thinking_process(text: str) -> str:
-    if not isinstance(text, str):
-        return ""
-    if "</think>" in text:
-        parts = text.split("</think>")
-        text = parts[-1]
-    elif "</thought>" in text:
-        parts = text.split("</thought>")
-        text = parts[-1]
-    text = re.sub(r"^<(think|thought)>.*$", "", text, flags=re.MULTILINE)
-    return text.strip()
 
 
 def _parse_metrics(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,11 +54,9 @@ class OllamaProvider(LLMProvider):
         self,
         base_url: str = "http://localhost:11434",
         model: str = "qwen3.5:4b",
-        model_think: bool = True,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.model_think = model_think
         self._temperature = 0.9
         self._stop = None
         self.token = os.environ.get("OLLAMA_TOKEN", "banana")
@@ -105,8 +89,6 @@ class OllamaProvider(LLMProvider):
         self._set_last_usage({})
 
         url = f"{self.base_url}/api/generate"
-        path_thinker_file = os.path.join(os.path.dirname(__file__), "_thinking.log")
-
         for attempt in range(self._MAX_LOOP_RETRIES):
             # Fixed temperatures per attempt: 0.5 → 0.7 → 0.9
             retry_temperature = [0.5, 0.7, 0.9][attempt]
@@ -115,7 +97,6 @@ class OllamaProvider(LLMProvider):
                 "model": self.model,
                 "prompt": user_text,
                 "stream": True,
-                "think": self.model_think,
                 "options": {
                     "temperature": retry_temperature,
                     "num_ctx": 8192,
@@ -160,14 +141,16 @@ class OllamaProvider(LLMProvider):
                             with open(path_thinker_file, "w") as f:
                                 f.write("")
 
-                            print(f"[Ollama] Thought: {len(thinking_output)} characters")
+                            print(f"[Ollama] think: {len(thinking_output)} characters")
                             with open("maria_thinking.log", "a") as f:
                                 f.write(event["thinking"])
 
                         if isinstance(event.get("response"), str):
                             response_output += event["response"]
                             if progress_callback:
-                                progress_callback(strip_thinking_process(response_output))
+                                progress_callback(
+                                    strip_thinking_process(response_output)
+                                )
 
                         if event.get("done") is True:
                             break

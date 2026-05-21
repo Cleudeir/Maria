@@ -6,26 +6,16 @@ from maria.memory import load_system_prompt, load_lessons, add_task_history
 from maria.tools import ToolExecutor, is_binary_file
 
 
-def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
+def parse_agent_response(response_text: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Parses agent response using regex to extract thoughts and XML-like tool calls.
+    Parses agent response using regex to extract XML-like tool calls.
+    Returns (tool_name, args).
     """
-    # Find thought - match until closing tag, or next tag, or end of response
-    thought_match = re.search(
-        r"<thought>(.*?)</thought>", response_text, re.DOTALL | re.IGNORECASE
-    )
-    if not thought_match:
-        thought_match = re.search(
-            r"<thought>(.*?)(?:<tool|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-    thought = thought_match.group(1).strip() if thought_match else ""
-
-    # Find tool call name
     tool_match = re.search(
         r"<tool\s+name=[\"']([^\"']+)[\"']\s*>", response_text, re.IGNORECASE
     )
     if not tool_match:
-        return thought, "", {}
+        return "", {}
 
     tool_name = tool_match.group(1).strip().lower()
     args = {}
@@ -54,7 +44,7 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
         )
         args["summary"] = summary_match.group(1).strip() if summary_match else ""
 
-    return thought, tool_name, args
+    return tool_name, args
 
 
 class MariaAgent:
@@ -442,18 +432,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         "content": response_text,
                     }
                 )
-                thought, tool_name, args = parse_agent_response(response_text)
-
-                if thought:
-                    print(f"💭 Thought:\n{thought}")
-                else:
-                    print("💭 Thought: (none expressed)")
+                tool_name, args = parse_agent_response(response_text)
 
                 if not tool_name:
                     print(
                         "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                     )
-                    err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
+                    err_msg = "Format error: You must output your reasoning followed by exactly one <tool name='...'>...</tool>. Do not ask questions or request input."
                     self.errors_encountered.append(
                         {"step": step_num, "type": "format_error", "message": err_msg}
                     )

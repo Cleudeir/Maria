@@ -36,7 +36,12 @@ from maria.memory import (
 )
 from maria.self_improvement import SelfImprovementAgent
 from maria.provider.ollama import LoopDetectedError
-from maria.step_checkpoint import save_checkpoint, load_checkpoint, restore_checkpoint_into_state, clear_checkpoint
+from maria.step_checkpoint import (
+    save_checkpoint,
+    load_checkpoint,
+    restore_checkpoint_into_state,
+    clear_checkpoint,
+)
 
 MAX_STAGE_RETRIES = 3
 
@@ -222,10 +227,9 @@ def build_step_prompt(state):
 
     prompt_lines.extend(
         [
-            "Respond using the exact format below:",
-            "<thought>Your reasoning here</thought>",
-            "<tool name='tool_name'>JSON arguments here</tool>",
-            "If no tool call is needed, return only <thought>...</thought> and omit the tool tag or use an empty tool name.",
+            "Respond with your reasoning followed by exactly one tool call using the format below:",
+            "<tool name='tool_name'>arguments here</tool>",
+            "If the step is done, use <tool name='finish_task'><summary>...</summary></tool>.",
         ]
     )
 
@@ -353,7 +357,6 @@ def run_agent_step_sync(
             state["proposed_tool"] = {
                 "name": "improve_prompt",
                 "args": {},
-                "thought": "Restarting task. Let's begin by improving the user prompt.",
             }
             state["stage"] = "improving_prompt"
             state["step"] = 0
@@ -385,7 +388,8 @@ def run_agent_step_sync(
     )
 
     agent = MariaAgent(
-        workspace_path, MEMORY_DIR,
+        workspace_path,
+        MEMORY_DIR,
         ollama_url=state.get("ollama_url", OLLAMA_URL),
         provider_type=state.get("provider_type", "ollama"),
         model_think=state.get("model_think", True),
@@ -462,7 +466,6 @@ def run_agent_step_sync(
             state["proposed_tool"] = {
                 "name": "generate_plan",
                 "args": {},
-                "thought": "Let's generate the complete implementation plan based on the improved prompt.",
             }
             if state["mode"] != "auto":
                 state["status"] = "awaiting_intervention"
@@ -476,9 +479,14 @@ def run_agent_step_sync(
                 state["proposed_tool"] = None
                 state["details"] = f"Failed to improve prompt: {e}"
             else:
-                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["details"] = (
+                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                )
                 state["status"] = "running"
-            print(f"[Stage] improving_prompt loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
+            print(
+                f"[Stage] improving_prompt loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
+                flush=True,
+            )
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
@@ -519,7 +527,6 @@ def run_agent_step_sync(
             state["proposed_tool"] = {
                 "name": "create_steps",
                 "args": {},
-                "thought": "Let's break the implementation plan down into sequential steps.",
             }
             if state["mode"] != "auto":
                 state["status"] = "awaiting_intervention"
@@ -533,9 +540,14 @@ def run_agent_step_sync(
                 state["proposed_tool"] = None
                 state["details"] = f"Failed to generate plan: {e}"
             else:
-                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["details"] = (
+                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                )
                 state["status"] = "running"
-            print(f"[Stage] generating_plan loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
+            print(
+                f"[Stage] generating_plan loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
+                flush=True,
+            )
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
@@ -575,7 +587,6 @@ def run_agent_step_sync(
             state["proposed_tool"] = {
                 "name": "execute_step",
                 "args": {"step_num": 1, "description": steps[0]},
-                "thought": f"Let's begin executing step 1 of {len(steps)}: {steps[0]}",
             }
             if state["mode"] != "auto":
                 state["status"] = "awaiting_intervention"
@@ -589,9 +600,14 @@ def run_agent_step_sync(
                 state["proposed_tool"] = None
                 state["details"] = f"Failed to create steps: {e}"
             else:
-                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["details"] = (
+                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                )
                 state["status"] = "running"
-            print(f"[Stage] creating_steps loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
+            print(
+                f"[Stage] creating_steps loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
+                flush=True,
+            )
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
@@ -758,9 +774,14 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 state["details"] = f"Failed to verify execution: {e}"
                 trigger_self_improvement(task_id, state)
             else:
-                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["details"] = (
+                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                )
                 state["status"] = "running"
-            print(f"[Stage] verifying loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
+            print(
+                f"[Stage] verifying loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
+                flush=True,
+            )
         except Exception as e:
             state["status"] = "failed"
             state["details"] = f"Failed to verify execution: {e}"
@@ -793,7 +814,6 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                     "action": "review",
                     "reason": review["reason"],
                     "summary": review.get("summary", ""),
-                    "thought": review["thought"],
                 }
             )
             state["proposed_tool"] = None
@@ -829,9 +849,14 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 state["details"] = f"Failed to review execution: {e}"
                 trigger_self_improvement(task_id, state)
             else:
-                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                state["details"] = (
+                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
+                )
                 state["status"] = "running"
-            print(f"[Stage] supervisor_review loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
+            print(
+                f"[Stage] supervisor_review loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
+                flush=True,
+            )
         except Exception as e:
             state["status"] = "failed"
             state["details"] = f"Failed to review execution: {e}"
@@ -876,7 +901,9 @@ def run_llm_for_tool(state, client):
                 state["details"] = err_msg
                 save_task_state(state["task_id"], state)
                 return state
-            state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - LLM loop detected"
+            state["details"] = (
+                f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - LLM loop detected"
+            )
             state["status"] = "running"
             save_task_state(state["task_id"], state)
             continue
@@ -905,10 +932,10 @@ def run_llm_for_tool(state, client):
             assistant_entry["ollama_usage"] = usage
         state["execution_log"].append(assistant_entry)
 
-        thought, tool_name, args = parse_agent_response(response_text)
+        tool_name, args = parse_agent_response(response_text)
 
         if not tool_name:
-            err_msg = "Format error: You must output <thought>...</thought> followed by exactly one <tool name='...'>...</tool>."
+            err_msg = "Format error: You must output your reasoning followed by exactly one <tool name='...'>...</tool>. Do not ask questions or request input."
             state["errors_encountered"].append(
                 {"step": state["step"], "type": "format_error", "message": err_msg}
             )
@@ -951,7 +978,6 @@ def run_llm_for_tool(state, client):
                         "step_num": next_idx + 1,
                         "description": state["steps"][next_idx],
                     },
-                    "thought": f"Let's begin executing step {next_idx + 1} of {len(state['steps'])}: {state['steps'][next_idx]}",
                 }
                 if state.get("mode") != "auto":
                     state["status"] = "awaiting_intervention"
@@ -963,7 +989,6 @@ def run_llm_for_tool(state, client):
                 state["proposed_tool"] = {
                     "name": "verify_execution",
                     "args": {},
-                    "thought": "All steps are completed. Let's perform the final audit and verification of all generated files.",
                 }
                 if state.get("mode") != "auto":
                     state["status"] = "awaiting_intervention"
@@ -972,7 +997,7 @@ def run_llm_for_tool(state, client):
             save_checkpoint(WORKSPACE_DIR, state["task_id"], state)
             return state
 
-        state["proposed_tool"] = {"name": tool_name, "args": args, "thought": thought}
+        state["proposed_tool"] = {"name": tool_name, "args": args}
         if state.get("mode") != "auto":
             state["status"] = "awaiting_intervention"
         else:
@@ -1222,7 +1247,6 @@ def create_task():
         "proposed_tool": {
             "name": "improve_prompt",
             "args": {},
-            "thought": "Let's begin by improving the user prompt using the LLM.",
         },
         "last_raw_response": None,
         "step_summaries": [],
@@ -1347,33 +1371,35 @@ def post_task_action(task_id):
     if action == "force_complete":
         status = data.get("status", "completed")
         reason = data.get("reason", "Manually finished by user.")
-        
+
         state["status"] = status
         state["details"] = reason
         state["proposed_tool"] = None
-        
-        state["execution_log"].append({
-            "step": state.get("step", 0) + 1,
-            "role": "system",
-            "content": f"🏁 Task manually marked as {status.upper()}: {reason}"
-        })
-        
+
+        state["execution_log"].append(
+            {
+                "step": state.get("step", 0) + 1,
+                "role": "system",
+                "content": f"🏁 Task manually marked as {status.upper()}: {reason}",
+            }
+        )
+
         try:
             outcome = "SUCCESS" if status == "completed" else "FAILED"
             add_task_history(MEMORY_DIR, state["task"], outcome, reason[:200])
         except Exception:
             pass
-            
+
         try:
             trigger_self_improvement(task_id, state)
         except Exception:
             pass
-            
+
         save_task_state(task_id, state)
-        
+
         if task_id in active_threads:
             del active_threads[task_id]
-            
+
         return jsonify(state)
 
     if action == "resume_auto":
@@ -1401,16 +1427,20 @@ def post_task_action(task_id):
             state["current_streaming_response"] = ""
             # Clear proposed_tool so the engine re-evaluates the next action
             state["proposed_tool"] = None
-            resolution = "Resumed from checkpoint at stage '{stage}', step {step}".format(
-                stage=checkpoint.get("stage", "unknown"),
-                step=checkpoint.get("step", 0),
+            resolution = (
+                "Resumed from checkpoint at stage '{stage}', step {step}".format(
+                    stage=checkpoint.get("stage", "unknown"),
+                    step=checkpoint.get("step", 0),
+                )
             )
             state["details"] = resolution
-            state["execution_log"].append({
-                "step": state.get("step", 0) + 1,
-                "role": "system",
-                "content": f"🔄 {resolution}",
-            })
+            state["execution_log"].append(
+                {
+                    "step": state.get("step", 0) + 1,
+                    "role": "system",
+                    "content": f"🔄 {resolution}",
+                }
+            )
 
         if state.get("status") in ("completed", "failed"):
             return jsonify(state)
@@ -1492,7 +1522,6 @@ def restart_task(task_id):
     state["proposed_tool"] = {
         "name": "improve_prompt",
         "args": {},
-        "thought": "Restarting task – let's begin by improving the user prompt.",
     }
     state["last_raw_response"] = None
     state["last_tool_result"] = None
@@ -1507,11 +1536,13 @@ def restart_task(task_id):
     state["verification_report"] = None
     state["verification_verdict"] = None
     state["details"] = None
-    state["execution_log"].append({
-        "step": 0,
-        "role": "system",
-        "content": "🔄 Task restarted by user.",
-    })
+    state["execution_log"].append(
+        {
+            "step": 0,
+            "role": "system",
+            "content": "🔄 Task restarted by user.",
+        }
+    )
 
     save_task_state(task_id, state)
 
@@ -1523,7 +1554,10 @@ def restart_task(task_id):
             if mode == "auto":
                 background_execution_loop(task_id)
         except Exception as e:
-            print(f"[Restart] _restart_initial_step crashed for {task_id}: {e}", flush=True)
+            print(
+                f"[Restart] _restart_initial_step crashed for {task_id}: {e}",
+                flush=True,
+            )
             try:
                 s = load_task_state(task_id)
                 if s and s.get("status") not in ("completed", "failed"):

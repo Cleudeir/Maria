@@ -88,18 +88,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     "content": response_text,
                 }
             )
-            thought, tool_name, args = parse_agent_response(response_text)
-
-            if thought:
-                print(f"💭 Thought:\n{thought}")
-            else:
-                print("💭 Thought: (none expressed)")
+            tool_name, args = parse_agent_response(response_text)
 
             if not tool_name:
                 print(
                     "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                 )
-                err_msg = "Format error: You must output your thoughts followed by exactly one <tool name='...'>...</tool>."
+                err_msg = "Format error: You must output your reasoning followed by exactly one <tool name='...'>...</tool>. Do not ask questions or request input."
                 errors_encountered.append(
                     {"step": step_num, "type": "format_error", "message": err_msg}
                 )

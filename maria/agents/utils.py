@@ -2,35 +2,19 @@ import re
 from typing import List, Dict, Tuple, Any
 
 
-def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
+def parse_agent_response(response_text: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Parses agent response using regex to extract thoughts and XML-like tool calls.
+    Parses agent response using regex to extract XML-like tool calls.
     Supports both nested XML tags and tag attributes (including self-closing tags).
+    Returns (tool_name, args).
     """
     if not isinstance(response_text, str):
-        return "", "", {}
-
-    # Extract all text before <tool as the thought if a tool is present
-    if re.search(r"<tool\b", response_text, re.IGNORECASE):
-        pre_tool_match = re.search(
-            r"^(.*?)(?:<tool\b|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        thought = pre_tool_match.group(1).strip() if pre_tool_match else ""
-    else:
-        thought = ""
-
-    if thought:
-        thought = re.sub(
-            r"^<(think|thought)>(.*)</(think|thought)>$",
-            r"\2",
-            thought,
-            flags=re.DOTALL | re.IGNORECASE,
-        ).strip()
+        return "", {}
 
     # Find the tool tag
     tool_tag_match = re.search(r"<tool\b[^>]*>", response_text, re.IGNORECASE)
     if not tool_tag_match:
-        return thought, "", {}
+        return "", {}
 
     tag_content = tool_tag_match.group(0)
 
@@ -39,14 +23,14 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
         r"\bname\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))", tag_content, re.IGNORECASE
     )
     if not name_match:
-        return thought, "", {}
+        return "", {}
 
     tool_name = (name_match.group(1) or name_match.group(2)).strip().lower()
     args = {}
 
     # Helper function to extract a parameter value
     def get_param(param_name: str, is_line_matching: bool = False) -> str:
-        # 1. Try nested tag first
+        # 1. Trd tag first
         if is_line_matching:
             nested_match = re.search(
                 rf"<{param_name}>([^<]*)", response_text, re.IGNORECASE
@@ -126,7 +110,7 @@ def parse_agent_response(response_text: str) -> Tuple[str, str, Dict[str, Any]]:
             if value:
                 args[param_name] = value
 
-    return thought, tool_name, args
+    return tool_name, args
 
 
 def is_llm_response(response_text: str) -> bool:

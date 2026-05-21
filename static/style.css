@@ -800,7 +800,7 @@ body {
     color: #fbbf24;
 }
 
-.log-thought {
+.log-plain {
     background: rgba(0, 0, 0, 0.2);
     padding: 14px;
     border-radius: 8px;
@@ -880,16 +880,6 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-.intervention-thought {
-    font-size: 14px;
-    line-height: 1.5;
-    color: #e2e8f0;
-    background: rgba(0, 0, 0, 0.3);
-    padding: 12px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .proposed-tool-box {

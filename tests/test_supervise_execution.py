@@ -5,7 +5,7 @@ from maria.agents.supervise_execution import supervise_proposed_tool
 
 def test_supervise_proposed_tool_approves_with_reason():
     def fake_get_generate(system_text, user_text):
-        return "<thought>This looks good.</thought><tool name='approve'><reason>Aligned with the plan.</reason></tool>"
+        return "<tool name='approve'><reason>Aligned with the plan.</reason></tool>"
 
     decision = supervise_proposed_tool(
         task="Build a todo app",
@@ -22,13 +22,11 @@ def test_supervise_proposed_tool_approves_with_reason():
 
     assert decision["action"] == "approve"
     assert decision["reason"] == "Aligned with the plan."
-    assert decision["thought"] == "This looks good."
-    assert decision["raw_response"].startswith("<thought>")
 
 
 def test_supervise_proposed_tool_pauses_on_invalid_action():
     def fake_get_generate(system_text, user_text):
-        return "<thought>Cannot decide.</thought>"
+        return "<tool name='nonexistent'></tool>"
 
     decision = supervise_proposed_tool(
         task="Build a todo app",

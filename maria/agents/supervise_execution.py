@@ -28,7 +28,6 @@ def build_supervision_prompt(
         "Do not ask the user for help or intervention unless the command is critical.",
         "If the proposed action is unsafe or not aligned, reroute the step instead of pausing.",
         "Only respond with one of the following XML-formatted tool calls:",
-        "<thought>...</thought>",
         "<tool name='approve'><reason>...</reason></tool>",
         "<tool name='reroute'><new_step_description>...</new_step_description><reason>...</reason></tool>",
         "<tool name='pause'><reason>...</reason></tool>",
@@ -110,7 +109,7 @@ def supervise_proposed_tool(
     )
 
     response_text = get_generate_fn(system_text=None, user_text=prompt)
-    thought, tool_name, args = parse_agent_response(response_text)
+    tool_name, args = parse_agent_response(response_text)
 
     action = tool_name.lower() if tool_name else "pause"
     if action not in ("approve", "reroute", "pause"):
@@ -120,7 +119,6 @@ def supervise_proposed_tool(
         "action": action,
         "reason": args.get("reason", "No reason provided."),
         "new_step_description": args.get("new_step_description", ""),
-        "thought": thought,
         "raw_response": response_text,
         "reviewed_at": datetime.now().isoformat(),
     }
@@ -138,7 +136,6 @@ def build_result_supervision_prompt(
         "You are an autonomous supervisor that only reviews the final completed task result.",
         "Do not interrupt or change execution now. Your job is to analyze the completed work, the verification report, and explain whether the result is strong, weak, or requires a retry.",
         "Answer with a single XML tool call:",
-        "<thought>...</thought>",
         "<tool name='review'><reason>...</reason><summary>...</summary></tool>",
         "",
         f"Task: {task}",
@@ -191,7 +188,7 @@ def supervise_task_result(
     )
 
     response_text = get_generate_fn(system_text=None, user_text=prompt)
-    thought, tool_name, args = parse_agent_response(response_text)
+    tool_name, args = parse_agent_response(response_text)
 
     if tool_name.lower() not in ("review", "approve", "pause"):
         tool_name = "review"
@@ -200,7 +197,6 @@ def supervise_task_result(
         "action": "review",
         "reason": args.get("reason", "No reason provided."),
         "summary": args.get("summary", ""),
-        "thought": thought,
         "raw_response": response_text,
         "reviewed_at": datetime.now().isoformat(),
     }

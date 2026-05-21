@@ -41,7 +41,8 @@ document.addEventListener("DOMContentLoaded", () => {
     providerSelect.addEventListener("change", () => {
       const ollamaSettings = document.getElementById("ollama-settings");
       if (ollamaSettings) {
-        ollamaSettings.style.display = providerSelect.value === "ollama" ? "block" : "none";
+        ollamaSettings.style.display =
+          providerSelect.value === "ollama" ? "block" : "none";
       }
     });
   }
@@ -255,49 +256,23 @@ async function getTaskDetails(taskId) {
       consoleEl.style.display = "flex";
 
       const proposed = task.proposed_tool;
-      const thoughtEl = document.getElementById(
-        "intervention-thought-container",
-      );
       const proposedEl = document.getElementById("proposed-tool-container");
 
-      if (proposed) {
-        if (proposed.thought) {
-          thoughtEl.style.display = "block";
-          document.getElementById("intervention-thought").innerText =
-            proposed.thought;
-        } else {
-          thoughtEl.style.display = "none";
-        }
+      if (proposed && proposed.name) {
+        proposedEl.style.display = "block";
+        document.getElementById("proposed-tool-name").innerText =
+          proposed.name;
+        document.getElementById("proposed-tool-args").value = JSON.stringify(
+          proposed.args,
+          null,
+          2,
+        );
 
-        if (proposed.name) {
-          proposedEl.style.display = "block";
-          document.getElementById("proposed-tool-name").innerText =
-            proposed.name;
-          document.getElementById("proposed-tool-args").value = JSON.stringify(
-            proposed.args,
-            null,
-            2,
-          );
-
-          const approveBtn = document.getElementById("btn-approve-tool");
-          approveBtn.innerText = "Approve & Step";
-          approveBtn.style.display = "flex";
-          document.getElementById("btn-modify-tool").style.display = "flex";
-        } else if (proposed.thought) {
-          // A plan-only response: let user continue to next execution turn
-          proposedEl.style.display = "none";
-          const approveBtn = document.getElementById("btn-approve-tool");
-          approveBtn.innerText = "Continue";
-          approveBtn.style.display = "flex";
-          document.getElementById("btn-modify-tool").style.display = "none";
-        } else {
-          // Formatting error or system prompt turn
-          proposedEl.style.display = "none";
-          document.getElementById("btn-approve-tool").style.display = "none";
-          document.getElementById("btn-modify-tool").style.display = "none";
-        }
+        const approveBtn = document.getElementById("btn-approve-tool");
+        approveBtn.innerText = "Approve & Step";
+        approveBtn.style.display = "flex";
+        document.getElementById("btn-modify-tool").style.display = "flex";
       } else {
-        thoughtEl.style.display = "none";
         proposedEl.style.display = "none";
         document.getElementById("btn-approve-tool").style.display = "none";
         document.getElementById("btn-modify-tool").style.display = "none";
@@ -481,18 +456,6 @@ function renderLogContent(entry) {
   const content = escapeHtml(rawContent);
 
   if (entry.role === "assistant") {
-    let thoughtHtml = "";
-    let toolHtml = "";
-
-    const thoughtMatch =
-      rawContent.match(/<thought>([\s\S]*?)<\/thought>/i) ||
-      rawContent.match(/<thought>([\s\S]*?)(?:<tool|\Z)/i);
-    if (thoughtMatch) {
-      thoughtHtml = `<div class="log-thought">${renderCollapsibleText(
-        escapeHtml(thoughtMatch[1].trim()),
-      )}</div>`;
-    }
-
     const toolMatch = rawContent.match(
       /<tool\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/tool>/i,
     );
@@ -500,7 +463,7 @@ function renderLogContent(entry) {
       const toolName = toolMatch[1].trim();
       const argsBlock = escapeHtml(toolMatch[2].trim());
 
-      toolHtml = `
+      return `
                 <div class="log-tool-call">
                     <div class="log-tool-title"><i class="fa-solid fa-wrench"></i> Tool Action: ${escapeHtml(toolName)}</div>
                     <div class="log-tool-args">${renderCollapsibleText(argsBlock)}</div>
@@ -508,15 +471,11 @@ function renderLogContent(entry) {
             `;
     }
 
-    if (!thoughtHtml && !toolHtml) {
-      return `<div class="log-thought">${renderCollapsibleText(content)}</div>`;
-    }
-
-    return thoughtHtml + toolHtml;
+    return `<div class="log-plain">${renderCollapsibleText(content)}</div>`;
   }
 
   if (entry.role === "tool_result") {
-    return `<div class="log-thought log-tool-result-text">${renderCollapsibleText(content)}</div>`;
+    return `<div class="log-plain log-tool-result-text">${renderCollapsibleText(content)}</div>`;
   }
 
   return `<div style="font-size: 14px; line-height: 1.5;">${renderCollapsibleText(content)}</div>`;
@@ -537,7 +496,10 @@ function renderStreamingPanel(task) {
 
   panel.style.display = "flex";
   let text = task.current_streaming_response || "Waiting for generation...";
-  if (task.current_streaming_response && task.current_streaming_response.length > 200) {
+  if (
+    task.current_streaming_response &&
+    task.current_streaming_response.length > 200
+  ) {
     text = "..." + task.current_streaming_response.slice(-200);
   }
   contentEl.innerHTML = escapeHtml(text).replace(/\n/g, "<br>");
@@ -1058,7 +1020,9 @@ async function submitFinishTask() {
   if (!currentTaskId) return;
   const reason = document.getElementById("finish-task-reason").value.trim();
   if (!reason) {
-    alert("Please provide a reason or summary for manually finishing the task.");
+    alert(
+      "Please provide a reason or summary for manually finishing the task.",
+    );
     return;
   }
 
@@ -1066,13 +1030,13 @@ async function submitFinishTask() {
     const res = await fetch(`/api/tasks/${currentTaskId}/action`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         action: "force_complete",
         status: finishOutcome,
-        reason: reason
-      })
+        reason: reason,
+      }),
     });
 
     if (!res.ok) {
