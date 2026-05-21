@@ -117,7 +117,7 @@ class MariaAgent:
         memory_dir: str,
         ollama_url: str = "http://localhost:11434",
         provider_type: str = "ollama",
-        model_think: bool = True,
+        model_think: bool = False,
     ):
         self.workspace_dir = os.path.abspath(workspace_dir)
         os.makedirs(self.workspace_dir, exist_ok=True)

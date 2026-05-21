@@ -11,7 +11,7 @@ class LLMClient:
         provider: Optional[LLMProvider] = None,
         base_url: str = "http://localhost:11434",
         model: str = "qwen3.5:4b",
-        model_think: bool = True,
+        model_think: bool = False,
         provider_type: str = "ollama",
     ):
         if provider is not None:

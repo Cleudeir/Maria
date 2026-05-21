@@ -526,10 +526,10 @@ def test_create_task_with_model_think(monkeypatch, tmp_path):
     data = response.get_json()
     assert data["model_think"] is True
 
-    # 3. Create a task without model_think (should default to True)
+    # 3. Create a task without model_think (should default to False)
     response = client.post(
         "/api/tasks", json={"task": "Test task with default think", "mode": "step"}
     )
     assert response.status_code == 200
     data = response.get_json()
-    assert data["model_think"] is True
+    assert data["model_think"] is False

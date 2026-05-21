@@ -6,7 +6,7 @@ from maria.agents.utils import parse_self_improvement_response, parse_compacted_
 
 
 class SelfImprovementAgent:
-    def __init__(self, memory_dir: str, ollama_url: str = "http://localhost:11434", model_think: bool = True):
+    def __init__(self, memory_dir: str, ollama_url: str = "http://localhost:11434", model_think: bool = False):
         self.memory_dir = memory_dir
         self.client = LLMClient(base_url=ollama_url, model_think=model_think)
 

@@ -55,7 +55,7 @@ class OllamaProvider(LLMProvider):
         self,
         base_url: str = "http://localhost:11434",
         model: str = "qwen3.5:4b",
-        model_think: bool = True,
+        model_think: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model

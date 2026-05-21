@@ -384,7 +384,7 @@ def run_agent_step_sync(
     client = OllamaClient(
         base_url=state.get("ollama_url", OLLAMA_URL),
         provider_type=state.get("provider_type", "ollama"),
-        model_think=state.get("model_think", True),
+        model_think=state.get("model_think", False),
     )
 
     agent = MariaAgent(
@@ -392,7 +392,7 @@ def run_agent_step_sync(
         MEMORY_DIR,
         ollama_url=state.get("ollama_url", OLLAMA_URL),
         provider_type=state.get("provider_type", "ollama"),
-        model_think=state.get("model_think", True),
+        model_think=state.get("model_think", False),
     )
 
     def _start_streaming():
@@ -1226,7 +1226,7 @@ def create_task():
 
     max_steps = int(data.get("max_steps", 20))
     mode = data.get("mode", "step")  # 'step' or 'auto'
-    model_think = bool(data.get("model_think", True))
+    model_think = bool(data.get("model_think", False))
     provider_type = data.get("provider_type", "ollama")
 
     # 1. Create isolated directory and output directory

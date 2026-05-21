@@ -801,11 +801,19 @@ async function restartTask() {
   if (!currentTaskId) return;
   if (!confirm("Are you sure you want to restart this failed task?")) return;
 
+  const restartBtn = document.getElementById("btn-restart-task");
+  if (restartBtn) {
+    restartBtn.disabled = true;
+    restartBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Restarting...';
+  }
+
   try {
     const res = await fetch(`/api/tasks/${currentTaskId}/restart`, {
       method: "POST",
     });
     if (res.ok) {
+      renderedLogEntries = {};
+      lastTaskDetailsJson = "";
       await getTaskDetails(currentTaskId);
       await loadTasksList();
     } else {
@@ -815,6 +823,11 @@ async function restartTask() {
   } catch (err) {
     console.error("Error restarting task", err);
     alert("Error restarting task: " + err.message);
+  } finally {
+    if (restartBtn) {
+      restartBtn.disabled = false;
+      restartBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Restart';
+    }
   }
 }
 
@@ -944,7 +957,7 @@ async function submitNewTask() {
 
     // Clear fields
     document.getElementById("new-task-prompt").value = "";
-    document.getElementById("new-task-model-think").checked = true;
+    document.getElementById("new-task-model-think").checked = false;
     document.getElementById("new-task-provider").value = "ollama";
 
     // Select and load the new task

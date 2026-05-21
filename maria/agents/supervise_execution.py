@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from maria.provider.ollama import OllamaProvider
+from maria.provider.opencode import OpenCodeProvider
 from maria.agents.utils import parse_agent_response
 
-_default_supervision_provider = OllamaProvider()
+_default_supervision_provider = OpenCodeProvider()
 
 
 def _default_generate(system_text, user_text, progress_callback=None):

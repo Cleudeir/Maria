@@ -28,7 +28,7 @@ class OpenCodeProvider(LLMProvider):
         self,
         base_url: str = OPENCODE_API_URL,
         model: str = OPENCODE_MODEL,
-        model_think: bool = True,
+        model_think: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
