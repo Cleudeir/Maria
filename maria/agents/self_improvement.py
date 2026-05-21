@@ -95,8 +95,8 @@ YOUR MISSION:
      * A clear Title describing the error situation.
      * The Error message that occurred.
      * The Resolution / actionable guidance for the agent.
-3. Review the current System Prompt. Refine it if necessary. Add specific rules, tips, or clarifications to avoid the errors seen in this run, while keeping the XML structure, TDD rules, and available tools exactly the same.
-   Note: Your improved system prompt should focus on the '## DYNAMIC GUIDELINES & LESSONS LEARNED:' section. You may output just the refined guidelines or the complete prompt, but the base tools and XML rules must be preserved.
+3. Review the current System Prompt. Refine it if necessary. Add specific rules, tips, or clarifications to avoid the errors seen in this run, while keeping the JSON structure, TDD rules, and available tools exactly the same.
+   Note: Your improved system prompt should focus on the '## DYNAMIC GUIDELINES & LESSONS LEARNED:' section. You may output just the refined guidelines or the complete prompt, but the base tools and JSON rules must be preserved.
 
 Output your response using the following XML tags:
 
@@ -250,7 +250,7 @@ Here is the current list of lessons learned:
 
 MISSION:
 - Analyze all lessons.
-- Identify duplicate or overlapping rules (e.g. multiple lessons about XML formatting, multiple lessons about TDD flow, multiple lessons about folder paths).
+- Identify duplicate or overlapping rules (e.g. multiple lessons about JSON formatting, multiple lessons about TDD flow, multiple lessons about folder paths).
 - Merge them into single, comprehensive lessons with clear Titles, summary of Errors, and consolidated Resolutions.
 - Keep the guidance actionable and precise.
 

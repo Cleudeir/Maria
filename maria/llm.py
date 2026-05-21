@@ -2,7 +2,7 @@ import os
 from typing import List, Dict, Any, Optional, Callable
 
 from maria.provider import create_provider, LLMProvider
-from maria.provider.ollama import strip_thinking_process
+from maria.provider.opencode import strip_thinking_process
 
 
 class LLMClient:

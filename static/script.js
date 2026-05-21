@@ -456,12 +456,59 @@ function renderLogContent(entry) {
   const content = escapeHtml(rawContent);
 
   if (entry.role === "assistant") {
-    const toolMatch = rawContent.match(
-      /<tool\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/tool>/i,
-    );
-    if (toolMatch) {
-      const toolName = toolMatch[1].trim();
-      const argsBlock = escapeHtml(toolMatch[2].trim());
+    let toolName = null;
+    let argsBlock = "";
+    const jsonMatch = rawContent.match(/\{[^{}]*"tool"\s*:/);
+    if (jsonMatch) {
+      const startIdx = jsonMatch.index;
+      let braceCount = 0;
+      let inString = false;
+      let escapeNext = false;
+      let endIdx = startIdx;
+      
+      for (let i = startIdx; i < rawContent.length; i++) {
+        const char = rawContent[i];
+        
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
+        }
+        
+        if (char === '\\') {
+          escapeNext = true;
+          continue;
+        }
+        
+        if (char === '"' && !escapeNext) {
+          inString = !inString;
+          continue;
+        }
+        
+        if (inString) continue;
+        
+        if (char === '{') braceCount++;
+        else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIdx = i + 1;
+            break;
+          }
+        }
+      }
+      
+      if (braceCount === 0) {
+        try {
+          let jsonStr = rawContent.substring(startIdx, endIdx);
+          jsonStr = jsonStr.replace(/(?<="[^"]*)\n(?=[^"]*")/g, '\\n')
+                           .replace(/(?<="[^"]*)\r(?=[^"]*")/g, '\\r')
+                           .replace(/(?<="[^"]*)\t(?=[^"]*")/g, '\\t');
+          const jsonData = JSON.parse(jsonStr);
+          toolName = jsonData.tool;
+          argsBlock = escapeHtml(JSON.stringify(jsonData.args || {}, null, 2));
+        } catch (e) {}
+      }
+    }
+    if (toolName) {
 
       return `
                 <div class="log-tool-call">

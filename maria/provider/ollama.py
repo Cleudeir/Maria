@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Callable
 from dotenv import load_dotenv
 
 from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format
+from maria.provider.opencode import strip_thinking_process
 
 
 class LoopDetectedError(Exception):
@@ -54,9 +55,11 @@ class OllamaProvider(LLMProvider):
         self,
         base_url: str = "http://localhost:11434",
         model: str = "qwen3.5:4b",
+        model_think: bool = True,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.model_think = model_think
         self._temperature = 0.9
         self._stop = None
         self.token = os.environ.get("OLLAMA_TOKEN", "banana")
@@ -97,6 +100,7 @@ class OllamaProvider(LLMProvider):
                 "model": self.model,
                 "prompt": user_text,
                 "stream": True,
+                "think": self.model_think,
                 "options": {
                     "temperature": retry_temperature,
                     "num_ctx": 8192,
@@ -137,9 +141,6 @@ class OllamaProvider(LLMProvider):
 
                         if event.get("thinking"):
                             thinking_output += event["thinking"]
-
-                            with open(path_thinker_file, "w") as f:
-                                f.write("")
 
                             print(f"[Ollama] think: {len(thinking_output)} characters")
                             with open("maria_thinking.log", "a") as f:

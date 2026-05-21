@@ -201,7 +201,7 @@ def build_step_prompt(state):
     prompt_lines = [
         "Use only the minimum context required for this step. Do not resend the entire conversation history.",
         "You are an agentic assistant executing a single step at a time.",
-        "You should output your reasoning and the next tool action in XML-like format.",
+        "You should output your reasoning and the next tool action in JSON format.",
         "\n",
         "Task:\n" + task_prompt,
         f"\nCurrent step: {state.get('step', 0) + 1} of {state.get('max_steps', 0)}.\n",
@@ -228,8 +228,8 @@ def build_step_prompt(state):
     prompt_lines.extend(
         [
             "Respond with your reasoning followed by exactly one tool call using the format below:",
-            "<tool name='tool_name'>arguments here</tool>",
-            "If the step is done, use <tool name='finish_task'><summary>...</summary></tool>.",
+            '{"tool": "tool_name", "args": {}}',
+            'If the step is done, use {"tool": "finish_task", "args": {"summary": "..."}}.',
         ]
     )
 
@@ -717,8 +717,17 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                         {"role": "assistant", "content": last_resp}
                     )
 
+                tool_content = f"TOOL RESULT:\n{tool_result}"
+                if tool_result.startswith("Error:"):
+                    tool_content += (
+                        f"\n\nADVICE: The tool execution failed. "
+                        f"Check the error above and try a different approach. "
+                        f"If a file does not exist, create it first. "
+                        f"If a directory is missing, use run_command with mkdir. "
+                        f"Review what went wrong and correct your approach."
+                    )
                 state["messages"].append(
-                    {"role": "user", "content": f"TOOL RESULT:\n{tool_result}"}
+                    {"role": "user", "content": tool_content}
                 )
                 state["execution_log"].append(
                     {
@@ -895,6 +904,20 @@ def run_llm_for_tool(state, client):
             state["is_streaming"] = False
             state["step"] -= 1
             state["stage_retries"] = state.get("stage_retries", 0) + 1
+
+            curr_idx = state.get("current_step_idx", 0)
+            step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+            err_guidance = (
+                f"ERROR: Loop detected - You are repeating the same pattern without making progress.\n\n"
+                f"ADVICE: To break out of this loop, try a completely different approach. "
+                f"Analyze what you have already done and what still needs to be done.\n\n"
+                f"CURRENT STEP: {step_desc}\n\n"
+                f"What you should do: Complete this step using your tools. "
+                f"If you have already written the necessary code and the step is done, "
+                f"call finish_task with a summary of what you did to proceed."
+            )
+            state["messages"].append({"role": "user", "content": err_guidance})
+
             if state["stage_retries"] >= MAX_STAGE_RETRIES:
                 err_msg = f"LLM loop detected after {MAX_STAGE_RETRIES} retries"
                 state["status"] = "failed"
@@ -935,7 +958,18 @@ def run_llm_for_tool(state, client):
         tool_name, args = parse_agent_response(response_text)
 
         if not tool_name:
-            err_msg = "Format error: You must output your reasoning followed by exactly one <tool name='...'>...</tool>. Do not ask questions or request input."
+            curr_idx = state.get("current_step_idx", 0)
+            step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+            err_msg = (
+                f"ERROR: Format error - Your response could not be parsed into a valid tool call.\n\n"
+                f"CORRECT FORMAT:\n"
+                f"Output your reasoning followed by exactly one tool call:\n"
+                f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n\n'
+                f"Available tools: list_dir, read_file, write_file, edit_file, find_in_files, grep_output, run_command, finish_task\n\n"
+                f"CURRENT STEP: {step_desc}\n\n"
+                f"What you should do: Determine the next action for this step and output it in the correct JSON format. "
+                f"Do not ask questions or request input. Execute autonomously."
+            )
             state["errors_encountered"].append(
                 {"step": state["step"], "type": "format_error", "message": err_msg}
             )
@@ -1892,9 +1926,10 @@ def shutdown_handler(signum=None, frame=None):
         print(f"[Shutdown] Error during shutdown cleanup: {e}", flush=True)
 
 
-signal.signal(signal.SIGTERM, shutdown_handler)
-signal.signal(signal.SIGINT, shutdown_handler)
-atexit.register(shutdown_handler)
+if not os.environ.get("MARIA_CLI"):
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+    atexit.register(shutdown_handler)
 
 if __name__ == "__main__":
     # Disable debug/reloader when running in production or under PM2.

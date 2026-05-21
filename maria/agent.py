@@ -1,4 +1,5 @@
 import os
+import json
 import re
 from typing import Callable, List, Dict, Tuple, Any, Optional
 from maria.llm import LLMClient
@@ -6,45 +7,107 @@ from maria.memory import load_system_prompt, load_lessons, add_task_history
 from maria.tools import ToolExecutor, is_binary_file
 
 
+def _extract_json_object(text: str, start_idx: int) -> str:
+    """Extract a JSON object starting at start_idx by tracking balanced braces, accounting for strings."""
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    
+    for i in range(start_idx, len(text)):
+        char = text[i]
+        
+        if escape_next:
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            escape_next = True
+            continue
+            
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+            
+        if in_string:
+            continue
+            
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                return text[start_idx:i+1]
+    
+    return ""
+
+
+def _sanitize_json_string(json_str: str) -> str:
+    """Fix common JSON issues from LLM output, like literal newlines in strings."""
+    result = []
+    in_string = False
+    escape_next = False
+    
+    for i, char in enumerate(json_str):
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            result.append(char)
+            escape_next = True
+            continue
+            
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            continue
+            
+        if in_string and char in ('\n', '\r', '\t'):
+            if char == '\n':
+                result.append('\\n')
+            elif char == '\r':
+                result.append('\\r')
+            elif char == '\t':
+                result.append('\\t')
+            continue
+            
+        result.append(char)
+    
+    return ''.join(result)
+
+
 def parse_agent_response(response_text: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Parses agent response using regex to extract XML-like tool calls.
+    Parses agent response to extract JSON tool calls.
+    Expected format: {"tool": "tool_name", "args": {"param1": "value1", ...}}
+    Handles markdown code blocks and common LLM formatting issues.
     Returns (tool_name, args).
     """
-    tool_match = re.search(
-        r"<tool\s+name=[\"']([^\"']+)[\"']\s*>", response_text, re.IGNORECASE
-    )
-    if not tool_match:
+    if not isinstance(response_text, str):
         return "", {}
 
-    tool_name = tool_match.group(1).strip().lower()
-    args = {}
+    json_match = re.search(r'\{[^{}]*"tool"\s*:', response_text, re.DOTALL)
+    if not json_match:
+        return "", {}
 
-    # Extract path if relevant - match until the next '<' character to handle closing tag typos
-    if tool_name in ("list_dir", "read_file", "write_file"):
-        path_match = re.search(r"<path>([^<]*)", response_text, re.IGNORECASE)
-        args["path"] = path_match.group(1).strip() if path_match else ""
+    start_idx = json_match.start()
+    json_str = _extract_json_object(response_text, start_idx)
+    
+    if not json_str:
+        return "", {}
 
-    # Extract content if write_file - match until closing tag or end of text
-    if tool_name == "write_file":
-        content_match = re.search(
-            r"<content>(.*?)(?:</content>|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        args["content"] = content_match.group(1) if content_match else ""
+    json_str = _sanitize_json_string(json_str)
 
-    # Extract command if run_command - match until next '<' character
-    if tool_name == "run_command":
-        command_match = re.search(r"<command>([^<]*)", response_text, re.IGNORECASE)
-        args["command"] = command_match.group(1).strip() if command_match else ""
-
-    # Extract summary if finish_task
-    if tool_name == "finish_task":
-        summary_match = re.search(
-            r"<summary>(.*?)(?:</summary>|\Z)", response_text, re.DOTALL | re.IGNORECASE
-        )
-        args["summary"] = summary_match.group(1).strip() if summary_match else ""
-
-    return tool_name, args
+    try:
+        data = json.loads(json_str)
+        tool_name = data.get("tool", "").strip().lower()
+        args = data.get("args", {})
+        if not tool_name:
+            return "", {}
+        return tool_name, args
+    except json.JSONDecodeError:
+        return "", {}
 
 
 class MariaAgent:
@@ -438,7 +501,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     print(
                         "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                     )
-                    err_msg = "Format error: You must output your reasoning followed by exactly one <tool name='...'>...</tool>. Do not ask questions or request input."
+                    err_msg = 'Format error: You must output your reasoning followed by exactly one JSON tool call: {"tool": "tool_name", "args": {}}. Do not ask questions or request input.'
                     self.errors_encountered.append(
                         {"step": step_num, "type": "format_error", "message": err_msg}
                     )

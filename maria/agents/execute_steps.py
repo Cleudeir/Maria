@@ -94,7 +94,16 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 print(
                     "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                 )
-                err_msg = "Format error: You must output your reasoning followed by exactly one <tool name='...'>...</tool>. Do not ask questions or request input."
+                err_msg = (
+                    f"ERROR: Format error - Your response could not be parsed into a valid tool call.\n\n"
+                    f"CORRECT FORMAT:\n"
+                    f"Output your reasoning followed by exactly one tool call:\n"
+                    f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n\n'
+                    f"Available tools: list_dir, read_file, write_file, edit_file, find_in_files, grep_output, run_command, finish_task\n\n"
+                    f"CURRENT STEP: {step_desc}\n\n"
+                    f"What you should do: Determine the next action for this step and output it in the correct JSON format. "
+                    f"Do not ask questions or request input. Execute autonomously."
+                )
                 errors_encountered.append(
                     {"step": step_num, "type": "format_error", "message": err_msg}
                 )
@@ -161,6 +170,13 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         "args": args,
                         "error": tool_result,
                     }
+                )
+                tool_result += (
+                    f"\n\nADVICE: The tool execution failed. "
+                    f"Check the error above and try a different approach. "
+                    f"If a file does not exist, create it first. "
+                    f"If a directory is missing, use run_command with mkdir. "
+                    f"Review what went wrong and correct your approach."
                 )
             else:
                 print(

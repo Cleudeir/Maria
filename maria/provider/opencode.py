@@ -75,6 +75,7 @@ class OpenCodeProvider(LLMProvider):
             "messages": messages,
             "stream": True,
             "temperature": self._temperature,
+            "think": self.model_think,
         }
 
         try:

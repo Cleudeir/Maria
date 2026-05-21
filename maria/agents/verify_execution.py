@@ -67,9 +67,8 @@ MISSION:
 2. Determine if anything is missing, incomplete, or contains obvious bugs.
 3. Conclude with a clear verdict: "VERDICT: SUCCESS" if all steps were executed successfully and code is complete, or "VERDICT: FAILED" if there are missing parts, errors, or uncompleted steps. Provide detailed feedback.
 
-Output your response using these XML tags:
-<analysis>Your detailed analysis and auditing findings</analysis>
-<verdict>SUCCESS or FAILED</verdict>
+Output your response as a JSON object:
+{{"analysis": "Your detailed analysis and auditing findings", "verdict": "SUCCESS or FAILED"}}
 """
     response = get_generate_fn(
         system_text="You are a code verification quality control assistant.",
@@ -77,17 +76,22 @@ Output your response using these XML tags:
         progress_callback=stream_callback,
     )
 
-    analysis_match = re.search(
-        r"<analysis>(.*?)</analysis>", response, re.DOTALL | re.IGNORECASE
-    )
-    verdict_match = re.search(
-        r"<verdict>(.*?)</verdict>", response, re.DOTALL | re.IGNORECASE
-    )
-
-    analysis = (
-        analysis_match.group(1).strip() if analysis_match else response.strip()
-    )
-    verdict = verdict_match.group(1).strip().upper() if verdict_match else "FAILED"
+    try:
+        import json
+        data = json.loads(response)
+        analysis = data.get("analysis", response.strip())
+        verdict = data.get("verdict", "FAILED").strip().upper()
+    except (json.JSONDecodeError, Exception):
+        analysis_match = re.search(
+            r"<analysis>(.*?)</analysis>", response, re.DOTALL | re.IGNORECASE
+        )
+        verdict_match = re.search(
+            r"<verdict>(.*?)</verdict>", response, re.DOTALL | re.IGNORECASE
+        )
+        analysis = (
+            analysis_match.group(1).strip() if analysis_match else response.strip()
+        )
+        verdict = verdict_match.group(1).strip().upper() if verdict_match else "FAILED"
     if "SUCCESS" in verdict:
         verdict = "SUCCESS"
     else:

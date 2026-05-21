@@ -1,123 +1,116 @@
+import json
 import re
 from typing import List, Dict, Tuple, Any
 
 
+def _extract_json_object(text: str, start_idx: int) -> str:
+    """Extract a JSON object starting at start_idx by tracking balanced braces, accounting for strings."""
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    
+    for i in range(start_idx, len(text)):
+        char = text[i]
+        
+        if escape_next:
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            escape_next = True
+            continue
+            
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+            
+        if in_string:
+            continue
+            
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                return text[start_idx:i+1]
+    
+    return ""
+
+
+def _sanitize_json_string(json_str: str) -> str:
+    """Fix common JSON issues from LLM output, like literal newlines in strings."""
+    result = []
+    in_string = False
+    escape_next = False
+    
+    for i, char in enumerate(json_str):
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            result.append(char)
+            escape_next = True
+            continue
+            
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            continue
+            
+        if in_string and char in ('\n', '\r', '\t'):
+            if char == '\n':
+                result.append('\\n')
+            elif char == '\r':
+                result.append('\\r')
+            elif char == '\t':
+                result.append('\\t')
+            continue
+            
+        result.append(char)
+    
+    return ''.join(result)
+
+
 def parse_agent_response(response_text: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Parses agent response using regex to extract XML-like tool calls.
-    Supports both nested XML tags and tag attributes (including self-closing tags).
+    Parses agent response to extract JSON tool calls.
+    Expected format: {"tool": "tool_name", "args": {"param1": "value1", ...}}
+    Handles markdown code blocks and common LLM formatting issues.
     Returns (tool_name, args).
     """
     if not isinstance(response_text, str):
         return "", {}
 
-    # Find the tool tag
-    tool_tag_match = re.search(r"<tool\b[^>]*>", response_text, re.IGNORECASE)
-    if not tool_tag_match:
+    json_match = re.search(r'\{[^{}]*"tool"\s*:', response_text, re.DOTALL)
+    if not json_match:
         return "", {}
 
-    tag_content = tool_tag_match.group(0)
-
-    # Extract tool name from tool tag attributes
-    name_match = re.search(
-        r"\bname\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))", tag_content, re.IGNORECASE
-    )
-    if not name_match:
+    start_idx = json_match.start()
+    json_str = _extract_json_object(response_text, start_idx)
+    
+    if not json_str:
         return "", {}
 
-    tool_name = (name_match.group(1) or name_match.group(2)).strip().lower()
-    args = {}
+    json_str = _sanitize_json_string(json_str)
 
-    # Helper function to extract a parameter value
-    def get_param(param_name: str, is_line_matching: bool = False) -> str:
-        # 1. Trd tag first
-        if is_line_matching:
-            nested_match = re.search(
-                rf"<{param_name}>([^<]*)", response_text, re.IGNORECASE
-            )
-        else:
-            nested_match = re.search(
-                rf"<{param_name}>(.*?)(?:</{param_name}>|\Z)",
-                response_text,
-                re.DOTALL | re.IGNORECASE,
-            )
-        if nested_match and nested_match.group(1).strip():
-            val = nested_match.group(1)
-            return (
-                val
-                if param_name in ("content", "target", "replacement")
-                else val.strip()
-            )
-
-        # 2. Try attribute in the tool tag
-        attr_match = re.search(
-            rf"\b{param_name}\s*=\s*(?:[\"']([^\"']*)[\"']|([^\"'\s>]+))",
-            tag_content,
-            re.IGNORECASE,
-        )
-        if attr_match:
-            val = attr_match.group(1) or attr_match.group(2)
-            return val
-        return ""
-
-    # Extract path if relevant
-    if tool_name in (
-        "list_dir",
-        "read_file",
-        "write_file",
-        "edit_file",
-        "find_in_files",
-    ):
-        args["path"] = get_param("path", is_line_matching=True)
-
-    # Extract content if write_file
-    if tool_name == "write_file":
-        args["content"] = get_param("content")
-
-    # Extract query if find_in_files or grep_output
-    if tool_name in ("find_in_files", "grep_output"):
-        args["query"] = get_param("query")
-
-    # Extract target and replacement if edit_file
-    if tool_name == "edit_file":
-        args["target"] = get_param("target")
-        args["replacement"] = get_param("replacement")
-
-    # Extract command if run_command
-    if tool_name == "run_command":
-        args["command"] = get_param("command", is_line_matching=True)
-
-    # Extract summary if finish_task
-    if tool_name == "finish_task":
-        args["summary"] = get_param("summary")
-
-    # Extract additional supervision or generic arguments
-    for param_name in (
-        "reason",
-        "new_step_description",
-        "path",
-        "query",
-        "target",
-        "replacement",
-        "content",
-        "command",
-        "summary",
-    ):
-        if param_name not in args:
-            value = get_param(
-                param_name, is_line_matching=(param_name in ("path", "command"))
-            )
-            if value:
-                args[param_name] = value
-
-    return tool_name, args
+    try:
+        data = json.loads(json_str)
+        tool_name = data.get("tool", "").strip().lower()
+        args = data.get("args", {})
+        if not tool_name:
+            return "", {}
+        return tool_name, args
+    except json.JSONDecodeError:
+        return "", {}
 
 
 def is_llm_response(response_text: str) -> bool:
     """Detect whether a loop response looks like an LLM assistant response."""
     if not isinstance(response_text, str) or not response_text.strip():
         return False
-    if re.search(r"<tool\b", response_text, re.IGNORECASE):
+    if re.search(r'\{[^{}]*"tool"\s*:', response_text, re.DOTALL):
         return True
     return False
 

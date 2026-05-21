@@ -5,6 +5,8 @@ import signal
 import time
 from maria.security import is_path_safe, is_command_critical, prompt_user_approval
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 BINARY_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
     ".pdf", ".doc", ".docx", ".xls", ".xlsx",
@@ -433,3 +435,76 @@ class ToolExecutor:
         finally:
             if self.task_id and pgid is not None:
                 unregister_task_process_group(self.task_id, pgid)
+
+    def modify_project_code(self, path: str, content: str, mode: str = "write") -> str:
+        """
+        Modifies the Maria project's own source code.
+        This tool allows the agent to change the project code.
+
+        Args:
+            path: Relative path from project root (e.g., 'maria/tools.py')
+            content: New content for the file
+            mode: 'write' (overwrite), 'append' (add to end), or 'edit' (requires target in content)
+        """
+        if not path:
+            return "Error: Path is required."
+
+        if os.path.isabs(path):
+            return "Error: Absolute paths are not allowed. Use relative paths from project root."
+
+        target_file = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+
+        if not target_file.startswith(os.path.abspath(PROJECT_ROOT)):
+            return "Error: Access Denied. Can only modify files within the Maria project directory."
+
+        filename = os.path.basename(path)
+        if filename.startswith('.'):
+            return "Error: Cannot modify hidden files."
+
+        _, ext = os.path.splitext(path)
+        allowed_extensions = {'.py', '.js', '.html', '.css', '.json', '.txt', '.md', '.yml', '.yaml', '.toml', '.cfg', '.ini', '.sh', '.bat'}
+        if ext not in allowed_extensions:
+            return f"Error: File extension '{ext}' is not allowed for project modification."
+
+        try:
+            if mode == "write":
+                os.makedirs(os.path.dirname(target_file), exist_ok=True)
+                with open(target_file, "w", encoding="utf-8") as f:
+                    f.write(content)
+                return f"Success: Project file '{path}' written successfully."
+
+            elif mode == "append":
+                if not os.path.exists(target_file):
+                    os.makedirs(os.path.dirname(target_file), exist_ok=True)
+                    with open(target_file, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    return f"Success: Project file '{path}' created and content appended."
+                with open(target_file, "a", encoding="utf-8") as f:
+                    f.write("\n" + content)
+                return f"Success: Content appended to project file '{path}'."
+
+            elif mode == "edit":
+                if not os.path.exists(target_file):
+                    return f"Error: File '{path}' does not exist."
+                with open(target_file, "r", encoding="utf-8") as f:
+                    current_content = f.read()
+
+                if "TARGET:" not in content or "REPLACEMENT:" not in content:
+                    return "Error: Edit mode requires 'TARGET:' and 'REPLACEMENT:' markers in content."
+
+                target_marker = content.split("TARGET:")[1].split("REPLACEMENT:")[0].strip()
+                replacement_marker = content.split("REPLACEMENT:")[1].strip()
+
+                if target_marker not in current_content:
+                    return f"Error: Target text not found in '{path}'."
+
+                new_content = current_content.replace(target_marker, replacement_marker, 1)
+                with open(target_file, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                return f"Success: Project file '{path}' edited successfully."
+
+            else:
+                return f"Error: Invalid mode '{mode}'. Use 'write', 'append', or 'edit'."
+
+        except Exception as e:
+            return f"Error: Failed to modify project code: {e}"
