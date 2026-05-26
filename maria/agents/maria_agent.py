@@ -1,12 +1,11 @@
 import os
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 from maria.llm import LLMClient
 from maria.memory import load_system_prompt, load_lessons, add_task_history
 from maria.tools import ToolExecutor
 
 from maria.agents.utils import parse_agent_response, is_llm_response
-from maria.agents.improve_prompt import improve_prompt
 from maria.agents.generate_plan import generate_plan
 from maria.agents.create_steps import create_steps
 from maria.agents.verify_execution import verify_execution
@@ -18,15 +17,15 @@ class MariaAgent:
         self,
         workspace_dir: str,
         memory_dir: str,
-        ollama_url: str = "http://localhost:11434",
+        base_url: str = "http://localhost:11434",
         model_think: bool = False,
-        provider_type: str = "ollama",
+        provider_type: str = "llamacpp",
     ):
         self.workspace_dir = os.path.abspath(workspace_dir)
         os.makedirs(self.workspace_dir, exist_ok=True)
         self.memory_dir = os.path.abspath(memory_dir)
         self.client = LLMClient(
-            base_url=ollama_url,
+            base_url=base_url,
             model_think=model_think,
             provider_type=provider_type,
         )
@@ -34,15 +33,8 @@ class MariaAgent:
         self.execution_log = []
         self.errors_encountered = []
 
-    def improve_prompt(self, task: str, lessons: List[Dict[str, str]], stream_callback=None) -> str:
-        return improve_prompt(
-            task, lessons,
-            get_generate_fn=self.client.provider.generate,
-            stream_callback=stream_callback,
-        )
-
-    def generate_plan(self, improved_prompt: str, stream_callback=None) -> str:
-        return generate_plan(improved_prompt, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
+    def generate_plan(self, task: str, stream_callback=None) -> str:
+        return generate_plan(task, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
 
     def create_steps(self, plan: str, stream_callback=None) -> List[str]:
         return create_steps(plan, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
@@ -85,7 +77,7 @@ class MariaAgent:
             base_prompt = load_system_prompt(self.memory_dir)
         except Exception as e:
             print(f"⚠️ Error loading system prompt, using fallback. Error: {e}")
-            base_prompt = "You are Maria, an agentic coding assistant. Use TDD."
+            base_prompt = "You are Maria, an agentic coding assistant."
 
         lessons = load_lessons(self.memory_dir)
         lessons_prompt = ""
@@ -99,35 +91,16 @@ class MariaAgent:
 
         system_message = base_prompt + lessons_prompt
 
-        # --- Stage 1: Improve Prompt ---
-        print("💡 Stage 1: Improving user prompt...")
+        # --- Stage 1: Generate Plan ---
+        print("📋 Stage 1: Generating complete plan...")
         self.execution_log.append(
             {
                 "step": 0,
                 "role": "system",
-                "content": "Stage 1: Improving user prompt...",
+                "content": "Stage 1: Generating complete plan...",
             }
         )
-        improved_prompt = self.improve_prompt(task, lessons)
-        print(f"Improved Prompt:\n{improved_prompt}\n")
-        self.execution_log.append(
-            {
-                "step": 0,
-                "role": "system",
-                "content": f"Improved Prompt:\n{improved_prompt}",
-            }
-        )
-
-        # --- Stage 2: Generate Plan ---
-        print("📋 Stage 2: Generating complete plan...")
-        self.execution_log.append(
-            {
-                "step": 0,
-                "role": "system",
-                "content": "Stage 2: Generating complete plan...",
-            }
-        )
-        plan = self.generate_plan(improved_prompt)
+        plan = self.generate_plan(task)
         print(f"Complete Plan:\n{plan}\n")
         self.execution_log.append(
             {"step": 0, "role": "system", "content": f"Complete Plan:\n{plan}"}
@@ -142,13 +115,13 @@ class MariaAgent:
         except Exception as e:
             print(f"⚠️ Warning: Could not write plan.md: {e}")
 
-        # --- Stage 3: Create Steps ---
-        print("🛠️ Stage 3: Creating execution steps...")
+        # --- Stage 2: Create Steps ---
+        print("🛠️ Stage 2: Creating execution steps...")
         self.execution_log.append(
             {
                 "step": 0,
                 "role": "system",
-                "content": "Stage 3: Creating execution steps...",
+                "content": "Stage 2: Creating execution steps...",
             }
         )
         steps = self.create_steps(plan)
@@ -183,13 +156,13 @@ class MariaAgent:
                 pass
             return False
 
-        # --- Stage 5: Final Verification ---
-        print("\n🔍 Stage 5: Verifying all plan was executed...")
+        # --- Stage 4: Final Verification ---
+        print("\n🔍 Stage 4: Verifying all plan was executed...")
         self.execution_log.append(
             {
                 "step": len(self.execution_log),
                 "role": "system",
-                "content": "Stage 5: Verifying all plan was executed...",
+                "content": "Stage 4: Verifying all plan was executed...",
             }
         )
 

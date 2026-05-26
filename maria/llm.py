@@ -2,7 +2,6 @@ import os
 from typing import List, Dict, Any, Optional, Callable
 
 from maria.provider import create_provider, LLMProvider
-from maria.provider.opencode import strip_thinking_process
 
 
 class LLMClient:
@@ -12,7 +11,7 @@ class LLMClient:
         base_url: str = "http://localhost:11434",
         model: str = "qwen3.5:4b",
         model_think: bool = False,
-        provider_type: str = "ollama",
+        provider_type: str = "llamacpp",
     ):
         if provider is not None:
             self.provider = provider

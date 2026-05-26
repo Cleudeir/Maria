@@ -20,7 +20,7 @@ def load_tasks(tasks_file):
     with open(tasks_file, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def run_task(task, workspace_base, memory_dir, ollama_url, max_steps):
+def run_task(task, workspace_base, memory_dir, base_url, max_steps):
     task_id = task["id"]
     task_name = task["name"]
     difficulty = task["difficulty"]
@@ -34,7 +34,7 @@ def run_task(task, workspace_base, memory_dir, ollama_url, max_steps):
     print(f"📁 Workspace: {task_workspace}")
     print(f"==========================================")
     
-    agent = MariaAgent(task_workspace, memory_dir, ollama_url=ollama_url)
+    agent = MariaAgent(task_workspace, memory_dir, base_url=base_url)
     
     start_time = time.time()
     agent_success = False
@@ -184,7 +184,7 @@ def main():
     parser.add_argument("--tasks-file", type=str, default=os.path.join(BASE_DIR, "benchmark", "tasks.json"), help="Path to tasks.json")
     parser.add_argument("--workspace", type=str, default=os.path.join(BASE_DIR, "workspace"), help="Path to workspace directory")
     parser.add_argument("--memory", type=str, default=os.path.join(BASE_DIR, "memory"), help="Path to memory directory")
-    parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama URL")
+    parser.add_argument("--base-url", type=str, default="http://localhost:11434", help="LLM API base URL")
     parser.add_argument("--difficulty", type=str, choices=["simple", "medium", "expert", "all"], default="all", help="Filter tasks by difficulty")
     parser.add_argument("--task", type=int, help="Run a specific task by ID")
     parser.add_argument("--max-steps", type=int, default=20, help="Max steps per task")
@@ -252,7 +252,7 @@ def main():
             })
         else:
             # Run task end-to-end
-            res = run_task(task, args.workspace, args.memory, args.ollama_url, args.max_steps)
+            res = run_task(task, args.workspace, args.memory, args.base_url, args.max_steps)
             results.append(res)
             
     print_summary_table(results)

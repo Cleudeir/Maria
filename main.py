@@ -9,7 +9,7 @@ def main():
     parser.add_argument("--workspace", type=str, default="workspace", help="Path to workspace directory.")
     parser.add_argument("--memory", type=str, default="memory", help="Path to memory directory.")
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum execution steps.")
-    parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama API base URL.")
+    parser.add_argument("--base-url", type=str, default="http://localhost:11434", help="LLM API base URL.")
     parser.add_argument("--isolate", action="store_true", default=True, help="Isolate task in its own workspace subfolder.")
     parser.add_argument("--no-isolate", dest="isolate", action="store_false", help="Do not isolate task in its own subfolder.")
     parser.add_argument("--compaction-threshold", type=int, default=10, help="Number of lessons before triggering memory compaction.")
@@ -96,8 +96,8 @@ def main():
             f.write(html_content)
         
     # Initialize agents
-    agent = MariaAgent(workspace_dir, memory_dir, ollama_url=args.ollama_url)
-    meta_agent = SelfImprovementAgent(memory_dir, ollama_url=args.ollama_url)
+    agent = MariaAgent(workspace_dir, memory_dir, base_url=args.base_url)
+    meta_agent = SelfImprovementAgent(memory_dir, base_url=args.base_url)
     
     # Run agent task
     try:

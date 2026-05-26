@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Tuple, Optional, Callable
 from maria.provider.base import format_messages_to_prompt
-from maria.agents.utils import parse_agent_response
+from maria.agents.utils import parse_agent_responses
 
 
 def execute_steps(
@@ -52,7 +52,17 @@ Complete Plan:
 Current Step: Step {step_num} of {total_steps}
 Step Description: {step_desc}
 
+ORGANIZATION RULE:
+- Split code into separate files by domain/responsibility
+- Each file should contain related functions with a single purpose
+- Each function must have one clear responsibility
+
 Your objective is to complete ONLY this step using your tools.
+You may call multiple tools in a single response by providing them sequentially:
+{{"tool": "run_command", "args": {{"command": "mkdir -p output"}}}}
+{{"tool": "write_file", "args": {{"path": "output/file.txt", "content": "..."}}}}
+Or as a JSON array:
+[{{"tool": "tool1", "args": {{...}}}}, {{"tool": "tool2", "args": {{...}}}}]
 When you believe this step is fully complete, call the 'finish_task' tool with a summary of what you did.
 """,
             },
@@ -88,18 +98,22 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     "content": response_text,
                 }
             )
-            tool_name, args = parse_agent_response(response_text)
+            tool_calls = parse_agent_responses(response_text)
 
-            if not tool_name:
+            if not tool_calls:
                 print(
                     "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                 )
                 err_msg = (
                     f"ERROR: Format error - Your response could not be parsed into a valid tool call.\n\n"
                     f"CORRECT FORMAT:\n"
-                    f"Output your reasoning followed by exactly one tool call:\n"
-                    f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n\n'
-                    f"Available tools: list_dir, read_file, write_file, edit_file, find_in_files, grep_output, run_command, finish_task\n\n"
+                    f"Output your reasoning followed by one or more JSON tool calls:\n"
+                    f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n'
+                    f'Or multiple sequentially:\n'
+                    f'{{"tool": "a", "args": {{}}}}{{"tool": "b", "args": {{}}}}\n'
+                    f'Or as a JSON array:\n'
+                    f'[{{"tool": "a", "args": {{}}}}, {{"tool": "b", "args": {{}}}}]\n\n'
+                    f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, run_command, finish_task\n\n"
                     f"CURRENT STEP: {step_desc}\n\n"
                     f"What you should do: Determine the next action for this step and output it in the correct JSON format. "
                     f"Do not ask questions or request input. Execute autonomously."
@@ -125,74 +139,107 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     break
                 continue
 
-            print(f"🛠️ Tool Call: {tool_name} with args: {args}")
+            # Execute all tool calls sequentially
+            all_results = []
+            stop_after_tools = False
+            for tool_name, args in tool_calls:
+                print(f"🛠️ Tool Call: {tool_name} with args: {args}")
 
-            if tool_name == "finish_task":
-                step_success = True
-                summary = args.get("summary", "Step completed.")
-                completed_step_summaries.append(f"{step_desc} -> {summary}")
-                print(f"✅ Step {step_num} finished: {summary}")
-                break
+                if tool_name == "finish_task":
+                    step_success = True
+                    summary = args.get("summary", "Step completed.")
+                    completed_step_summaries.append(f"{step_desc} -> {summary}")
+                    print(f"✅ Step {step_num} finished: {summary}")
+                    stop_after_tools = True
+                    break
 
-            # Execute tool
-            tool_result = ""
-            if tool_name == "list_dir":
-                tool_result = executor.list_dir(args.get("path", "."))
-            elif tool_name == "read_file":
-                tool_result = executor.read_file(args.get("path", ""))
-            elif tool_name == "write_file":
-                tool_result = executor.write_file(
-                    args.get("path", ""), args.get("content", "")
-                )
-            elif tool_name == "find_in_files":
-                tool_result = executor.find_in_files(
-                    args.get("query", ""), args.get("path", ".")
-                )
-            elif tool_name == "grep_output":
-                tool_result = executor.grep_output(args.get("query", ""))
-            elif tool_name == "edit_file":
-                tool_result = executor.edit_file(
-                    args.get("path", ""),
-                    args.get("target", ""),
-                    args.get("replacement", ""),
-                )
-            elif tool_name == "run_command":
-                tool_result = executor.run_command(args.get("command", ""))
-            else:
-                tool_result = f"Error: Tool '{tool_name}' is not supported."
+                # Execute tool
+                tool_result = ""
+                if tool_name == "list_dir":
+                    tool_result = executor.list_dir(args.get("path", "."))
+                elif tool_name == "read_file":
+                    tool_result = executor.read_file(args.get("path", ""))
+                elif tool_name == "write_file":
+                    tool_result = executor.write_file(
+                        args.get("path", ""), args.get("content", "")
+                    )
+                elif tool_name == "find_in_files":
+                    tool_result = executor.find_in_files(
+                        args.get("query", ""), args.get("path", ".")
+                    )
+                elif tool_name == "grep_output":
+                    tool_result = executor.grep_output(args.get("query", ""))
+                elif tool_name == "edit_file":
+                    tool_result = executor.edit_file(
+                        args.get("path", ""),
+                        args.get("target", ""),
+                        args.get("replacement", ""),
+                    )
+                elif tool_name == "edit_lines":
+                    tool_result = executor.edit_lines(
+                        args.get("path", ""),
+                        args.get("start_line", 1),
+                        args.get("end_line", 1),
+                        args.get("replacement", ""),
+                    )
+                elif tool_name == "grep":
+                    tool_result = executor.grep(
+                        args.get("path", ""),
+                        args.get("pattern", ""),
+                    )
+                elif tool_name == "run_command":
+                    tool_result = executor.run_command(args.get("command", ""))
+                else:
+                    tool_result = f"Error: Tool '{tool_name}' is not supported."
 
-            if tool_result.startswith("Error:"):
-                print(f"❌ Tool Execution Error:\n{tool_result}")
-                errors_encountered.append(
-                    {
-                        "step": step_num,
-                        "tool": tool_name,
-                        "args": args,
-                        "error": tool_result,
-                    }
-                )
-                tool_result += (
-                    f"\n\nADVICE: The tool execution failed. "
-                    f"Check the error and path and try a different approach. "
-                    f"If a file does not exist, create it first with write_file (parent dirs are auto-created). "
-                    f"Review what went wrong and correct your approach."
-                )
-            else:
-                print(
-                    f"🔍 Tool Result:\n{tool_result[:300] + '...' if len(tool_result) > 300 else tool_result}"
-                )
+                if tool_result.startswith("Error:"):
+                    print(f"❌ Tool Execution Error:\n{tool_result}")
+                    errors_encountered.append(
+                        {
+                            "step": step_num,
+                            "tool": tool_name,
+                            "args": args,
+                            "error": tool_result,
+                        }
+                    )
+                    if "Invalid path. Please specify a file path under the output directory" in tool_result:
+                        tool_result = (
+                            f"{tool_result}\n\n"
+                            f"⚠️ CRITICAL: Do NOT repeat this mistake! "
+                            f"You called '{tool_name}' with an empty or invalid path (path='{args.get('path', '')}'). "
+                            f"Always specify a valid file path like 'output/filename.ext' or just 'filename.ext'. "
+                            f"Never use empty string, '.', or './' as the path.\n\n"
+                            f"Current Step {step_num} instruction: {step_desc}"
+                        )
+                    else:
+                        tool_result += (
+                            f"\n\nADVICE: The tool execution failed. "
+                            f"Check the error and path and try a different approach. "
+                            f"If a file does not exist, create it first with write_file (parent dirs are auto-created). "
+                            f"Review what went wrong and correct your approach."
+                        )
+                else:
+                    print(
+                        f"🔍 Tool Result:\n{tool_result[:300] + '...' if len(tool_result) > 300 else tool_result}"
+                    )
 
+                all_results.append(f"[{tool_name}] {tool_result}")
+
+            combined_result = "\n---\n".join(all_results)
             step_messages.append({"role": "assistant", "content": response_text})
             step_messages.append(
-                {"role": "user", "content": f"TOOL RESULT:\n{tool_result}"}
+                {"role": "user", "content": f"TOOL RESULTS:\n{combined_result}"}
             )
             execution_log.append(
                 {
                     "step": len(execution_log),
                     "role": "tool_result",
-                    "content": tool_result,
+                    "content": combined_result,
                 }
             )
+
+            if stop_after_tools:
+                break
 
         if not step_success:
             print(f"⚠️ Step {step_num} did not finish successfully or timed out.")

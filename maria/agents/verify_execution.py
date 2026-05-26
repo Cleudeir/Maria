@@ -5,6 +5,9 @@ from typing import List, Tuple, Optional, Callable
 from maria.tools import is_binary_file
 
 
+MAX_FILE_CHARS = 8000
+MAX_TOTAL_CHARS = 40000
+
 def verify_execution(
     workspace_dir: str,
     plan: str,
@@ -19,10 +22,10 @@ def verify_execution(
         dirs[:] = [
             d
             for d in dirs
-            if d not in (".git", ".venv", "__pycache__", ".pytest_cache", "plan")
+            if d not in (".git", ".venv", "__pycache__", ".pytest_cache", "plan", "logs")
         ]
         for file in files:
-            if file in ("task_state.json", "task_info.html"):
+            if file in ("task_state.json", "task_info.html", "checkpoint.json"):
                 continue
             file_path = os.path.join(root, file)
             rel_path = os.path.relpath(file_path, workspace_dir)
@@ -31,9 +34,18 @@ def verify_execution(
                     f"\n--- FILE: {rel_path} (binary file, skipped) ---\n"
                 )
                 continue
+            # Stop reading more files if we've hit the total budget
+            if len(workspace_files_content) >= MAX_TOTAL_CHARS:
+                workspace_files_content += (
+                    f"\n--- (remaining files omitted, total content limit reached) ---\n"
+                )
+                break
             try:
                 with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
+                if len(content) > MAX_FILE_CHARS:
+                    half = MAX_FILE_CHARS // 2
+                    content = content[:half] + "\n\n... [truncated] ...\n\n" + content[-half:]
                 workspace_files_content += (
                     f"\n--- FILE: {rel_path} ---\n{content}\n"
                 )
@@ -41,6 +53,8 @@ def verify_execution(
                 workspace_files_content += (
                     f"\n--- FILE: {rel_path} (Failed to read: {e}) ---\n"
                 )
+        if len(workspace_files_content) >= MAX_TOTAL_CHARS:
+            break
 
     steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
 

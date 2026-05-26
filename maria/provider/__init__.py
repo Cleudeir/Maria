@@ -1,12 +1,12 @@
 from maria.provider.base import LLMProvider
-from maria.provider.ollama import OllamaProvider
-from maria.provider.opencode import OpenCodeProvider
+from maria.provider.llamacpp import LlamaCppProvider
+from maria.provider.local_llm import LocalLLMProvider
 
 
-def create_provider(provider_type: str = "ollama", **kwargs) -> LLMProvider:
+def create_provider(provider_type: str = "llamacpp", **kwargs) -> LLMProvider:
     providers = {
-        "ollama": OllamaProvider,
-        "opencode": OpenCodeProvider,
+        "llamacpp": LlamaCppProvider,
+        "local_llm": LocalLLMProvider,
     }
     cls = providers.get(provider_type.lower())
     if cls is None:

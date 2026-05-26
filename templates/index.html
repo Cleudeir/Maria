@@ -11,7 +11,7 @@
     <!-- FontAwesome for Premium Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- External stylesheet -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_version }}">
 </head>
 <body>
 
@@ -107,8 +107,8 @@
                 </div>
                 
                     <div class="task-header-actions">
-                    <button class="btn-action" id="btn-restart-task" onclick="restartTask()" style="display: none;">
-                        <i class="fa-solid fa-rotate"></i> Restart
+                    <button class="btn-action" id="btn-continue-task" onclick="continueTask()" style="display: none;">
+                        <i class="fa-solid fa-rotate"></i> Continue
                     </button>
                     <button class="btn-action" id="btn-finish-task" onclick="openFinishTaskModal()">
                         <i class="fa-solid fa-flag-checkered"></i> Finish Task
@@ -149,18 +149,11 @@
                             </div>
                         </div>
                         
-                        
                         <!-- Proposed Tool Edit Box -->
                         <div class="proposed-tool-box" id="proposed-tool-container" style="display: none;">
-                            <div class="proposed-tool-header">Proposed Tool: <span id="proposed-tool-name">write_file</span></div>
+                            <div class="proposed-tool-header">Proposed Tool: <span id="proposed-tool-name"><i class="fa-solid fa-wrench"></i> write_file</span></div>
                             <div class="form-label">Arguments JSON:</div>
                             <textarea class="tool-args-edit" id="proposed-tool-args"></textarea>
-                        </div>
-                        
-                        <!-- Free-form user text to override / prompt next turn -->
-                        <div>
-                            <div class="form-label">Send New Instruction / Prompt to Same Task:</div>
-                            <textarea class="intervention-prompt-input" id="intervention-prompt" placeholder="Tell the agent what to do, correct its strategy, or give a new task guideline..."></textarea>
                         </div>
                         
                         <div class="intervention-actions">
@@ -173,10 +166,15 @@
                             <button class="btn-intervention btn-continue" id="btn-continue" onclick="submitIntervention('continue')">
                                 <i class="fa-solid fa-forward"></i> Continue
                             </button>
-                            <button class="btn-intervention btn-send-prompt" onclick="submitIntervention('inject')">
-                                <i class="fa-solid fa-paper-plane"></i> Send Prompt
-                            </button>
                         </div>
+                    </div>
+
+                    <!-- Persistent Chat Input Bar (always visible when task is selected) -->
+                    <div class="task-chat-bar" id="task-chat-bar" style="display: none;">
+                        <textarea class="chat-bar-input" id="chat-bar-prompt" placeholder="Send a new instruction to the agent..." rows="2"></textarea>
+                        <button class="btn-chat-send" onclick="sendChatPrompt()">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
                     </div>
                 </div>
 
@@ -256,20 +254,11 @@
             <div class="form-group">
                 <label class="form-label">Provider</label>
                 <select class="form-select" id="new-task-provider">
-                    <option value="ollama">Ollama (Local)</option>
-                    <option value="opencode">OpenCode (Cloud)</option>
+                    <option value="llamacpp">LlamaCpp (Local)</option>
                 </select>
             </div>
 
-            <div class="form-group" id="ollama-settings">
-                <label class="form-label">Ollama Model Settings</label>
-                <div style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <input type="checkbox" id="new-task-model-think" style="width: 18px; height: 18px; accent-color: var(--color-primary); cursor: pointer; border-radius: 4px;">
-                    <label for="new-task-model-think" style="font-size: 13px; color: var(--text-secondary); cursor: pointer; user-select: none; font-weight: 500;">
-                        Enable Model Thinking (Reasoning Trace)
-                    </label>
-                </div>
-            </div>
+
             
             <div class="modal-footer">
                 <button class="btn-modal" onclick="closeModals()">Cancel</button>
@@ -349,6 +338,6 @@
     </div>
 
     <!-- External script -->
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v={{ static_version }}"></script>
 </body>
 </html>

@@ -51,7 +51,7 @@ python cli.py <command> [options]
 | `get <task_id>` | Get task details |
 | `action <task_id> <action>` | Execute action (approve, modify, inject, resume, resume_auto, force_complete) |
 | `pause <task_id>` | Pause a running task |
-| `restart <task_id>` | Restart a failed task |
+| `continue <task_id>` | Continue a failed task |
 | `delete <task_id>` | Delete a task |
 | `files <task_id> <view\|edit\|list>` | Manage task files |
 | `memory <prompt\|lessons>` | Manage system memory |
@@ -87,8 +87,8 @@ python cli.py pause task_20260521_120000
 # Resume auto mode
 python cli.py action task_20260521_120000 resume_auto --wait
 
-# Restart a failed task
-python cli.py restart task_20260521_120000
+# Continue a failed task
+python cli.py continue task_20260521_120000
 
 # View task files
 python cli.py files task_20260521_120000 view plan/plan.md
@@ -171,7 +171,7 @@ memory/
 | GET | `/api/tasks/<id>` | Get task |
 | POST | `/api/tasks/<id>/action` | Execute action |
 | POST | `/api/tasks/<id>/pause` | Pause task |
-| POST | `/api/tasks/<id>/restart` | Restart task |
+| POST | `/api/tasks/<id>/continue` | Continue task |
 | DELETE | `/api/tasks/<id>` | Delete task |
 | GET | `/api/tasks/<id>/files/view?path=` | View file |
 | GET | `/api/tasks/<id>/files/raw/<path>` | Raw file |
@@ -197,7 +197,7 @@ CLI options for `create`:
 | `--mode` | step | `step` or `auto` |
 | `--model-think` | true | Enable model thinking |
 | `--no-model-think` | - | Disable model thinking |
-| `--provider` | ollama | Provider type |
+| `--provider` | llamacpp | Provider type |
 | `--wait` | false | Wait for completion |
 
 ## Tests

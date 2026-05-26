@@ -1,33 +1,23 @@
-import os
 import json
 import requests
 import threading
 from typing import List, Dict, Any, Optional, Callable
 
-from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format
+from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format, ContextExceededError, RetryableError
+from maria.provider.base import strip_thinking_process, extract_reasoning
 
 
 _thread_local = threading.local()
 
-OPENCODE_API_URL = "https://opencode.ai/zen/go/v1/chat/completions"
-OPENCODE_MODEL = "deepseek-v4-flash"
+LOCAL_LLM_URL = "http://192.168.20.180:8081/v1/chat/completions"
+LOCAL_LLM_MODEL = "default"
 
 
-def strip_thinking_process(text: str) -> str:
-    if not isinstance(text, str):
-        return ""
-    # Strip internal model thinking tags before extracting tool calls
-    if "</think>" in text:
-        parts = text.split("</think>")
-        text = parts[-1]
-    return text.strip()
-
-
-class OpenCodeProvider(LLMProvider):
+class LocalLLMProvider(LLMProvider):
     def __init__(
         self,
-        base_url: str = OPENCODE_API_URL,
-        model: str = OPENCODE_MODEL,
+        base_url: str = LOCAL_LLM_URL,
+        model: str = LOCAL_LLM_MODEL,
         model_think: bool = False,
     ):
         self.base_url = base_url.rstrip("/")
@@ -35,15 +25,11 @@ class OpenCodeProvider(LLMProvider):
         self.model_think = model_think
         self._temperature = 0.9
         self._stop = None
-        self.api_key = os.environ.get("OPENCODE_API_KEY", "")
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
+        self.headers = {"Content-Type": "application/json"}
 
     @property
     def name(self) -> str:
-        return "opencode"
+        return "local_llm"
 
     @property
     def last_usage(self) -> Dict[str, Any]:
@@ -75,7 +61,6 @@ class OpenCodeProvider(LLMProvider):
             "messages": messages,
             "stream": True,
             "temperature": self._temperature,
-            "think": self.model_think,
         }
 
         try:
@@ -90,6 +75,7 @@ class OpenCodeProvider(LLMProvider):
 
             response_output = ""
             last_usage = {}
+            last_timings = None
 
             for raw_line in response.iter_lines(decode_unicode=True):
                 if not raw_line:
@@ -109,10 +95,6 @@ class OpenCodeProvider(LLMProvider):
                 except ValueError:
                     continue
 
-                if "error" in event:
-                    error_msg = event["error"].get("message", str(event["error"]))
-                    raise RuntimeError(f"OpenCode API error: {error_msg}")
-
                 choice = event.get("choices", [{}])[0]
                 delta = choice.get("delta", {})
                 content = delta.get("content") or event.get("content") or choice.get("text")
@@ -126,6 +108,10 @@ class OpenCodeProvider(LLMProvider):
                 if usage:
                     last_usage = usage
 
+                timings = event.get("timings")
+                if timings:
+                    last_timings = timings
+
             if not response_output:
                 try:
                     body = response.text[:1000]
@@ -133,7 +119,11 @@ class OpenCodeProvider(LLMProvider):
                         parsed = json.loads(body)
                         if isinstance(parsed, dict) and "error" in parsed:
                             err_msg = parsed["error"].get("message", str(parsed["error"]))
-                            raise RuntimeError(f"OpenCode API error: {err_msg}")
+                            if "Context size has been exceeded" in err_msg:
+                                raise ContextExceededError(f"LocalLLM API error: {err_msg}")
+                            raise RetryableError(f"LocalLLM API error: {err_msg}")
+                except (ContextExceededError, RetryableError):
+                    raise
                 except Exception:
                     pass
 
@@ -143,19 +133,35 @@ class OpenCodeProvider(LLMProvider):
                     "completion_tokens": last_usage.get("completion_tokens", 0),
                     "total_tokens": last_usage.get("total_tokens", 0),
                 })
+            elif last_timings:
+                prompt_n = last_timings.get("prompt_n", 0)
+                predicted_n = last_timings.get("predicted_n", 0)
+                self._set_last_usage({
+                    "prompt_tokens": prompt_n,
+                    "completion_tokens": predicted_n,
+                    "total_tokens": prompt_n + predicted_n,
+                })
 
+            self._set_last_reasoning(extract_reasoning(response_output))
             return strip_thinking_process(response_output)
 
         except requests.exceptions.RequestException as e:
             error_text = ""
+            status_code = None
             if hasattr(e, 'response') and e.response is not None:
+                status_code = e.response.status_code
                 try:
                     body = e.response.text[:500]
                     if body:
                         error_text = f": {body}"
                 except Exception:
                     pass
-            raise RuntimeError(f"OpenCode request failed{error_text}")
+            full_msg = f"LocalLLM request failed{error_text}"
+            if status_code == 500 and "Context size has been exceeded" in error_text:
+                raise ContextExceededError(full_msg)
+            if status_code in (429, 503) or isinstance(e, requests.exceptions.Timeout):
+                raise RetryableError(full_msg)
+            raise RuntimeError(full_msg)
 
     def chat(
         self,

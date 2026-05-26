@@ -1,3 +1,0 @@
-# Initial content
-
-# Appended content

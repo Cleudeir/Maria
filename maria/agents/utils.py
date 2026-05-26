@@ -34,7 +34,16 @@ def _extract_json_object(text: str, start_idx: int) -> str:
             if brace_count == 0:
                 return text[start_idx:i+1]
     
-    return ""
+    # If we reached the end without closing all braces, try to recover
+    # by adding a closing quote for unclosed strings and missing braces
+    fixed = text[start_idx:]
+    if in_string:
+        while fixed.endswith('`'):
+            fixed = fixed[:-1]
+        fixed += '"'
+    for _ in range(brace_count):
+        fixed += '}'
+    return fixed
 
 
 def _sanitize_json_string(json_str: str) -> str:
@@ -70,40 +79,126 @@ def _sanitize_json_string(json_str: str) -> str:
             
         result.append(char)
     
-    return ''.join(result)
+    sanitized = ''.join(result)
+    
+    # Strip trailing markdown code fences that got included due to unclosed JSON strings
+    if sanitized.endswith('```'):
+        sanitized = sanitized[:-3]
+    if sanitized.endswith('``'):
+        sanitized = sanitized[:-2]
+    
+    return sanitized
 
 
 def parse_agent_response(response_text: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Parses agent response to extract JSON tool calls.
+    Parses agent response to extract a single JSON tool call.
     Expected format: {"tool": "tool_name", "args": {"param1": "value1", ...}}
     Handles markdown code blocks and common LLM formatting issues.
     Returns (tool_name, args).
     """
+    calls = parse_agent_responses(response_text)
+    if calls:
+        return calls[0]
+    return "", {}
+
+
+def parse_agent_responses(response_text: str) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Parses agent response to extract ALL JSON tool calls.
+    Supports both formats:
+      1. Sequential JSON objects: {"tool": "a", ...} {"tool": "b", ...}
+      2. JSON array: [{"tool": "a", ...}, {"tool": "b", ...}]
+    Handles markdown code blocks and common LLM formatting issues.
+    Returns a list of (tool_name, args) tuples.
+    """
     if not isinstance(response_text, str):
-        return "", {}
+        return []
 
-    json_match = re.search(r'\{[^{}]*"tool"\s*:', response_text, re.DOTALL)
-    if not json_match:
-        return "", {}
+    results = []
+    text = response_text.strip()
 
-    start_idx = json_match.start()
-    json_str = _extract_json_object(response_text, start_idx)
-    
-    if not json_str:
-        return "", {}
+    # Try JSON array format first
+    array_match = re.search(r'\[\s*\{', text, re.DOTALL)
+    if array_match:
+        array_start = array_match.start()
+        brace_count = 0
+        bracket_count = 0
+        in_string = False
+        escape_next = False
+        end_idx = -1
+        for i in range(array_start, len(text)):
+            char = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == '[':
+                bracket_count += 1
+            elif char == ']':
+                bracket_count -= 1
+                if bracket_count == 0:
+                    end_idx = i + 1
+                    break
+            elif char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
 
-    json_str = _sanitize_json_string(json_str)
+        if end_idx > 0:
+            array_str = text[array_start:end_idx]
+            try:
+                data_list = json.loads(array_str)
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict):
+                            tool_name = item.get("tool", "").strip().lower()
+                            if "args" not in item:
+                                args = {k: v for k, v in item.items() if k != "tool"}
+                            else:
+                                args = item.get("args", {})
+                            if tool_name:
+                                results.append((tool_name, args))
+            except json.JSONDecodeError:
+                pass
 
-    try:
-        data = json.loads(json_str)
-        tool_name = data.get("tool", "").strip().lower()
-        args = data.get("args", {})
-        if not tool_name:
-            return "", {}
-        return tool_name, args
-    except json.JSONDecodeError:
-        return "", {}
+    # If array format didn't yield results, try sequential JSON objects
+    if not results:
+        pos = 0
+        while True:
+            json_match = re.search(r'\{[^{}]*"tool"\s*:', text[pos:], re.DOTALL)
+            if not json_match:
+                break
+
+            start_idx = pos + json_match.start()
+            json_str = _extract_json_object(text, start_idx)
+            if not json_str:
+                pos = start_idx + 1
+                continue
+
+            json_str = _sanitize_json_string(json_str)
+            try:
+                data = json.loads(json_str)
+                tool_name = data.get("tool", "").strip().lower()
+                if "args" not in data:
+                    args = {k: v for k, v in data.items() if k != "tool"}
+                else:
+                    args = data.get("args", {})
+                if tool_name:
+                    results.append((tool_name, args))
+            except json.JSONDecodeError:
+                pass
+
+            pos = start_idx + len(json_str)
+
+    return results
 
 
 def is_llm_response(response_text: str) -> bool:

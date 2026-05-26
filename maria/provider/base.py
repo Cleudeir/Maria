@@ -2,6 +2,37 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Callable
 
 
+class LoopDetectedError(Exception):
+    pass
+
+
+class ContextExceededError(Exception):
+    pass
+
+
+class RetryableError(Exception):
+    pass
+
+
+def strip_thinking_process(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    if "</think>" in text:
+        parts = text.split("</think>")
+        text = parts[-1]
+    return text.strip()
+
+
+def extract_reasoning(text: str) -> Optional[str]:
+    if not isinstance(text, str) or "<think>" not in text or "</think>" not in text:
+        return None
+    start = text.find("<think>") + len("<think>")
+    end = text.find("</think>")
+    if start >= end:
+        return None
+    return text[start:end].strip()
+
+
 def extract_text(content: Any) -> str:
     if isinstance(content, str):
         return content

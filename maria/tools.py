@@ -339,6 +339,79 @@ class ToolExecutor:
         except Exception as e:
             return f"Error: Failed to grep output directory: {e}"
 
+    def grep(self, path: str, pattern: str) -> str:
+        """
+        Searches for a regex pattern inside a specific file and returns matching lines with line numbers.
+        """
+        target_file, error = self._resolve_output_path(path)
+        if error:
+            return error
+
+        if not os.path.exists(target_file):
+            return f"Error: File '{path}' does not exist."
+        if os.path.isdir(target_file):
+            return f"Error: Path '{path}' is a directory, not a file."
+
+        filename = os.path.basename(target_file)
+        if filename in ("task_state.json", "task_info.html"):
+            return "Error: Access Denied. Internal system file."
+
+        try:
+            compiled = re.compile(pattern)
+        except Exception:
+            return f"Error: Invalid regex pattern '{pattern}'."
+
+        try:
+            results = []
+            with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
+                for lineno, line in enumerate(f, 1):
+                    if compiled.search(line):
+                        results.append(f"{lineno}: {line.rstrip()}")
+            return "\n".join(results) if results else "No matches found."
+        except Exception as e:
+            return f"Error: Failed to read file: {e}"
+
+    def edit_lines(self, path: str, start_line: int, end_line: int, replacement: str) -> str:
+        """
+        Replaces a range of lines (from start_line to end_line inclusive) in a file with the given replacement text.
+        Lines are 1-indexed.
+        """
+        target_file, error = self._resolve_output_path(path)
+        if error:
+            return error
+
+        if not os.path.exists(target_file):
+            return f"Error: File '{path}' does not exist."
+        if os.path.isdir(target_file):
+            return f"Error: Path '{path}' is a directory, not a file."
+
+        filename = os.path.basename(target_file)
+        if filename in ("task_state.json", "task_info.html"):
+            return "Error: Access Denied. Internal system file."
+
+        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
+        if not is_path_safe(output_dir, target_file):
+            return "Error: Access Denied. Edited files must be within the output directory."
+
+        try:
+            with open(target_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            total = len(lines)
+            if start_line < 1 or start_line > total:
+                return f"Error: start_line {start_line} is out of range (file has {total} lines)."
+            if end_line < start_line or end_line > total:
+                return f"Error: end_line {end_line} is out of range (file has {total} lines)."
+
+            new_lines = lines[: start_line - 1] + [replacement + "\n" if not replacement.endswith("\n") else replacement] + lines[end_line:]
+
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+
+            return f"Success: Lines {start_line}-{end_line} in '{path}' replaced."
+        except Exception as e:
+            return f"Error: Failed to edit file: {e}"
+
     def edit_file(self, path: str, target: str, replacement: str) -> str:
         """
         Edits a file inside the workspace output directory by replacing a target block of text with a replacement block.

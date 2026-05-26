@@ -85,6 +85,12 @@ OTHER RULES:
 - For commands using "git", "rm", "mv", or "cp", user approval is required on the terminal.
 - All paths are relative to workspace root. Do not use absolute paths or "..".
 
+CODE ORGANIZATION:
+- Split code into separate files by domain and responsibility
+- Each file should contain only related functions that serve the same purpose
+- Each function must have a single, clear responsibility
+- Group utility functions separately from business logic
+
 TDD EXECUTION FLOW:
 For every task, you must:
 1. Write a failing unit test first.

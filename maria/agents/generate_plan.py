@@ -1,29 +1,22 @@
 from typing import Optional, Callable
 
 def generate_plan(
-    improved_prompt: str,
+    task: str,
     get_generate_fn,
     stream_callback: Optional[Callable[[str], None]] = None,
 ) -> str:
-    prompt = f"""You are a senior software architect. Based on the following detailed task description, generate a complete, comprehensive implementation plan.
-The plan must describe:
-1. Architecture & Design Choices
-2. Target File Structure (files to create, files to modify)
-3. Step-by-step implementation strategy
-4. Testing strategy (how to verify each component)
-
-Important: The plan should be descriptive only. Do not include code snippets, pseudocode, or direct implementation commands. Explain what to do, but do not write the code itself.
-
-Detailed Task Description:
----
-{improved_prompt}
----
-
-Response Format:
-Provide the complete plan in clear Markdown. No conversational preamble.
-"""
+    prompt = (
+        f"Generate a detailed implementation plan for: {task}\n\n"
+        "ORGANIZATION RULES:\n"
+        "- Split the code into separate files by domain and responsibility\n"
+        "- Each file should contain only related functions that serve the same purpose\n"
+        "- Each function must have a single, clear responsibility\n"
+        "- Group utility functions separately from business logic\n"
+        "- Keep configuration separate from code\n"
+        "- Use clear, descriptive file and function names"
+    )
     response = get_generate_fn(
-        system_text="You are a software architect assistant.",
+        system_text="You are a senior software engineer designing a well-structured implementation plan.",
         user_text=prompt,
         progress_callback=stream_callback,
     )

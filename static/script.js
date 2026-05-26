@@ -35,14 +35,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Toggle Ollama settings visibility based on provider
-  const providerSelect = document.getElementById("new-task-provider");
-  if (providerSelect) {
-    providerSelect.addEventListener("change", () => {
-      const ollamaSettings = document.getElementById("ollama-settings");
-      if (ollamaSettings) {
-        ollamaSettings.style.display =
-          providerSelect.value === "ollama" ? "block" : "none";
+  // Ctrl+Enter / Cmd+Enter to send from chat bar
+  const chatInput = document.getElementById("chat-bar-prompt");
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        sendChatPrompt();
       }
     });
   }
@@ -193,11 +192,11 @@ async function getTaskDetails(taskId) {
       }
     }
 
-    const restartBtn = document.getElementById("btn-restart-task");
+    const continueBtn = document.getElementById("btn-continue-task");
     const motivoEl = document.getElementById("task-motivo");
     const motivoText = document.getElementById("task-motivo-text");
     if (task.status === "failed") {
-      if (restartBtn) restartBtn.style.display = "flex";
+      if (continueBtn) continueBtn.style.display = "flex";
       if (motivoEl && task.details) {
         motivoText.innerText = task.details;
         motivoEl.style.display = "flex";
@@ -205,7 +204,7 @@ async function getTaskDetails(taskId) {
         motivoEl.style.display = "none";
       }
     } else {
-      if (restartBtn) restartBtn.style.display = "none";
+      if (continueBtn) continueBtn.style.display = "none";
       if (motivoEl) motivoEl.style.display = "none";
     }
 
@@ -216,7 +215,7 @@ async function getTaskDetails(taskId) {
     const showSupervisorPanel =
       (task.status === "completed" || task.status === "failed") &&
       task.supervision_status === "reviewed" &&
-      task.supervision_review_summary;
+      (task.supervision_review_summary || task.supervision_reason);
 
     if (showSupervisorPanel) {
       const bannerTitle = document.getElementById("supervision-title");
@@ -261,8 +260,9 @@ async function getTaskDetails(taskId) {
 
       if (proposed && proposed.name) {
         proposedEl.style.display = "block";
-        document.getElementById("proposed-tool-name").innerText =
-          proposed.name;
+        const cfg = TOOL_CONFIG[proposed.name] || { icon: 'fa-solid fa-wrench', color: '#6366f1' };
+        document.getElementById("proposed-tool-name").innerHTML =
+          `<i class="${cfg.icon}" style="color:${cfg.color}"></i> ${escapeHtml(proposed.name)}`;
         document.getElementById("proposed-tool-args").value = JSON.stringify(
           proposed.args,
           null,
@@ -281,6 +281,12 @@ async function getTaskDetails(taskId) {
     } else {
       consoleEl.style.display = "none";
     }
+
+    // Always show the persistent chat bar when a task is selected
+    const chatBar = document.getElementById("task-chat-bar");
+    if (chatBar) {
+      chatBar.style.display = "flex";
+    }
   } catch (err) {
     console.error("Error loading task details", err);
     currentTaskId = null;
@@ -288,6 +294,8 @@ async function getTaskDetails(taskId) {
     lastFileTreeJson = null;
     document.getElementById("welcome-view").style.display = "flex";
     document.getElementById("task-view").style.display = "none";
+    const chatBar = document.getElementById("task-chat-bar");
+    if (chatBar) chatBar.style.display = "none";
   }
 }
 
@@ -318,7 +326,7 @@ function renderCollapsibleText(text) {
   return `<div class="log-collapsible-text">${text}</div>`;
 }
 
-function formatOllamaUsage(usage) {
+function formatLlmUsage(usage) {
   if (!usage || typeof usage !== "object") return "";
   const parts = [];
   if (Number.isInteger(usage.prompt_tokens)) {
@@ -434,8 +442,8 @@ function renderExecutionLogs(log) {
       titleText = '<span style="color: #cf222e;">🛡️ SUPERVISOR AGINDO APÓS ERRO</span>';
     }
 
-    const usageBadge = entry.ollama_usage
-      ? `<span class="log-usage-badge">${escapeHtml(formatOllamaUsage(entry.ollama_usage))}</span>`
+    const usageBadge = entry.llm_usage
+      ? `<span class="log-usage-badge">${escapeHtml(formatLlmUsage(entry.llm_usage))}</span>`
       : "";
 
     card.innerHTML = `
@@ -456,6 +464,19 @@ function renderExecutionLogs(log) {
     container.scrollTop = preserveScrollTop;
   }
 }
+
+const TOOL_CONFIG = {
+  list_dir:      { icon: 'fa-solid fa-folder-open',  color: '#3b82f6' },
+  read_file:     { icon: 'fa-solid fa-file-lines',   color: '#06b6d4' },
+  write_file:    { icon: 'fa-solid fa-pen-to-square', color: '#10b981' },
+  edit_file:     { icon: 'fa-solid fa-pen',           color: '#f59e0b' },
+  edit_lines:    { icon: 'fa-solid fa-lines-leaning', color: '#f59e0b' },
+  grep:          { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
+  find_in_files: { icon: 'fa-solid fa-search',        color: '#a855f7' },
+  grep_output:   { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
+  run_command:   { icon: 'fa-solid fa-terminal',      color: '#ef4444' },
+  finish_task:   { icon: 'fa-solid fa-flag-checkered', color: '#10b981' },
+};
 
 function renderLogContent(entry) {
   const rawContent = entry.content || "";
@@ -515,10 +536,11 @@ function renderLogContent(entry) {
       }
     }
     if (toolName) {
+      const cfg = TOOL_CONFIG[toolName] || { icon: 'fa-solid fa-wrench', color: '#6366f1' };
 
       return `
-                <div class="log-tool-call">
-                    <div class="log-tool-title"><i class="fa-solid fa-wrench"></i> Tool Action: ${escapeHtml(toolName)}</div>
+                <div class="log-tool-call log-tool-${escapeHtml(toolName)}">
+                    <div class="log-tool-title"><i class="${cfg.icon}" style="color:${cfg.color}"></i> Tool Action: ${escapeHtml(toolName)}</div>
                     <div class="log-tool-args">${renderCollapsibleText(argsBlock)}</div>
                 </div>
             `;
@@ -802,19 +824,19 @@ async function saveEditorContent() {
   }
 }
 
-// Restart failed task
-async function restartTask() {
+// Continue failed task
+async function continueTask() {
   if (!currentTaskId) return;
-  if (!confirm("Are you sure you want to restart this failed task?")) return;
+  if (!confirm("Are you sure you want to continue this failed task?")) return;
 
-  const restartBtn = document.getElementById("btn-restart-task");
-  if (restartBtn) {
-    restartBtn.disabled = true;
-    restartBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Restarting...';
+  const continueBtn = document.getElementById("btn-continue-task");
+  if (continueBtn) {
+    continueBtn.disabled = true;
+    continueBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Continuing...';
   }
 
   try {
-    const res = await fetch(`/api/tasks/${currentTaskId}/restart`, {
+    const res = await fetch(`/api/tasks/${currentTaskId}/continue`, {
       method: "POST",
     });
     if (res.ok) {
@@ -824,15 +846,15 @@ async function restartTask() {
       await loadTasksList();
     } else {
       const errData = await res.json();
-      alert("Failed to restart task: " + (errData.error || "Unknown error"));
+      alert("Failed to continue task: " + (errData.error || "Unknown error"));
     }
   } catch (err) {
-    console.error("Error restarting task", err);
-    alert("Error restarting task: " + err.message);
+    console.error("Error continuing task", err);
+    alert("Error continuing task: " + err.message);
   } finally {
-    if (restartBtn) {
-      restartBtn.disabled = false;
-      restartBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Restart';
+    if (continueBtn) {
+      continueBtn.disabled = false;
+      continueBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> Continue';
     }
   }
 }
@@ -855,6 +877,8 @@ async function deleteActiveTask() {
       currentTaskId = null;
       document.getElementById("welcome-view").style.display = "flex";
       document.getElementById("task-view").style.display = "none";
+      const chatBar = document.getElementById("task-chat-bar");
+      if (chatBar) chatBar.style.display = "none";
       loadTasksList();
       refreshDashboard();
     } else {
@@ -887,25 +911,9 @@ async function submitIntervention(action) {
     payload.modified_tool = { name: toolName, args: toolArgs };
   }
 
-  if (action === "inject") {
-    const userPrompt = document
-      .getElementById("intervention-prompt")
-      .value.trim();
-    if (!userPrompt) {
-      alert("Please write a instruction prompt first.");
-      return;
-    }
-    payload.user_prompt = userPrompt;
-  }
-
   if (action === "continue") {
     payload.action = "inject";
     payload.user_prompt = "continue";
-  }
-
-  // Clear prompt only after a user-inject action so typed instructions are not lost during approve/modify actions.
-  if (action === "inject") {
-    document.getElementById("intervention-prompt").value = "";
   }
 
   if (buttons) {
@@ -950,6 +958,51 @@ async function submitIntervention(action) {
   }
 }
 
+// Send prompt from persistent chat bar
+async function sendChatPrompt() {
+  if (!currentTaskId) return;
+
+  const inputEl = document.getElementById("chat-bar-prompt");
+  const sendBtn = document.querySelector(".btn-chat-send");
+  const prompt = inputEl.value.trim();
+
+  if (!prompt) {
+    inputEl.focus();
+    return;
+  }
+
+  sendBtn.disabled = true;
+  inputEl.disabled = true;
+
+  try {
+    const res = await fetch(`/api/tasks/${currentTaskId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "inject", user_prompt: prompt }),
+    });
+
+    if (!res.ok) {
+      let errMsg = "Request failed";
+      try { const errData = await res.json(); errMsg = errData.error || errMsg; } catch (_) {}
+      alert("Failed: " + errMsg);
+      return;
+    }
+
+    inputEl.value = "";
+    renderedLogEntries = {};
+    lastTaskDetailsJson = "";
+    await getTaskDetails(currentTaskId);
+    await loadTasksList();
+  } catch (err) {
+    console.error("Error sending prompt", err);
+    alert("Error: " + err.message);
+  } finally {
+    sendBtn.disabled = false;
+    inputEl.disabled = false;
+    inputEl.focus();
+  }
+}
+
 // --- Modals Handlers ---
 
 function openNewTaskModal() {
@@ -964,7 +1017,6 @@ async function submitNewTask() {
     return;
   }
   const mode = document.getElementById("new-task-mode").value;
-  const modelThink = document.getElementById("new-task-model-think").checked;
   const provider = document.getElementById("new-task-provider").value;
 
   closeModals();
@@ -976,7 +1028,6 @@ async function submitNewTask() {
       body: JSON.stringify({
         task: taskText,
         mode: mode,
-        model_think: modelThink,
         provider_type: provider,
       }),
     });
@@ -984,8 +1035,7 @@ async function submitNewTask() {
 
     // Clear fields
     document.getElementById("new-task-prompt").value = "";
-    document.getElementById("new-task-model-think").checked = false;
-    document.getElementById("new-task-provider").value = "ollama";
+    document.getElementById("new-task-provider").value = "llamacpp";
 
     // Select and load the new task
     selectTask(task.task_id);
