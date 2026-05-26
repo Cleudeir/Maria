@@ -1,10 +1,10 @@
 # Maria
 
-Maria is a self-improving agentic SLM (Small Language Model) system that autonomously completes coding tasks using Ollama. It follows a multi-stage pipeline: prompt improvement, planning, step creation, execution, verification, and supervisor review.
+Maria is a self-improving agentic SLM (Small Language Model) system that autonomously completes coding tasks using Ollama. It follows a multi-stage pipeline: prompt improvement, planning, step creation, execution, and verification.
 
 ## Features
 
-- **Multi-stage pipeline**: Improves prompts, generates plans, breaks into steps, executes, verifies, and reviews
+- **Multi-stage pipeline**: Improves prompts, generates plans, breaks into steps, executes, and verifies
 - **Two execution modes**: `step` (manual approval per action) or `auto` (fully autonomous)
 - **Tool use**: list_dir, read_file, write_file, run_command, finish_task
 - **Self-improvement**: Learns from errors and stores lessons to prevent repeating mistakes
@@ -127,8 +127,7 @@ python main.py "Build a calculator in Python" --max-steps 20 --workspace workspa
 3. **Creating Steps** - Breaks the plan into 3-5 high-level milestones
 4. **Executing Steps** - Runs each step with tool calls (LLM-driven)
 5. **Verifying** - Audits generated files against the plan
-6. **Supervisor Review** - Final pass/fail decision
-7. **Self-Improvement** - Extracts lessons from errors (background)
+6. **Self-Improvement** - Extracts lessons from errors (background)
 
 ### Key Files
 

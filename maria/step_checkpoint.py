@@ -33,10 +33,6 @@ def save_checkpoint(workspace_dir, task_id, state):
         "mode": state.get("mode"),
         "verification_report": state.get("verification_report"),
         "verification_verdict": state.get("verification_verdict"),
-        "supervision_status": state.get("supervision_status", "idle"),
-        "supervision_reason": state.get("supervision_reason"),
-        "supervision_review_summary": state.get("supervision_review_summary"),
-        "supervision_log": state.get("supervision_log", []),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -65,8 +61,6 @@ def restore_checkpoint_into_state(checkpoint, state):
         "completed_step_summaries", "steps", "plan", "improved_prompt",
         "last_tool_result", "last_user_intervention", "last_raw_response",
         "errors_encountered", "verification_report", "verification_verdict",
-        "supervision_status", "supervision_reason", "supervision_review_summary",
-        "supervision_log",
     ):
         if key in checkpoint and checkpoint[key] is not None:
             state[key] = checkpoint[key]

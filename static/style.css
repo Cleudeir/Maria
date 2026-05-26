@@ -234,95 +234,6 @@ body {
     color: #94a3b8;
 }
 
-.supervision-card {
-    display: grid;
-    grid-template-columns: 48px 1fr;
-    gap: 16px;
-    padding: 18px;
-    margin: 18px 24px 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(15, 22, 40, 0.92);
-    border-radius: 18px;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
-}
-
-.supervision-icon {
-    width: 48px;
-    height: 48px;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(6, 182, 212, 0.18));
-    border-radius: 16px;
-    display: grid;
-    place-items: center;
-    color: var(--color-primary);
-    font-size: 20px;
-}
-
-.supervision-info {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.supervision-heading {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text-primary);
-}
-
-.supervision-meta-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.supervision-pill {
-    display: inline-flex;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.status-approve {
-    color: var(--color-success);
-    background: rgba(16, 185, 129, 0.12);
-}
-
-.status-reroute {
-    color: var(--color-warning);
-    background: rgba(245, 158, 11, 0.12);
-}
-
-.status-pause {
-    color: var(--color-danger);
-    background: rgba(239, 68, 68, 0.12);
-}
-
-.status-reviewed {
-    color: var(--color-primary);
-    background: rgba(99, 102, 241, 0.12);
-}
-
-.supervision-timestamp {
-    color: var(--text-muted);
-    font-size: 12px;
-}
-
-.supervision-reason,
-.supervision-extra {
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-secondary);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 14px;
-    padding: 12px 14px;
-}
-
 .task-item-desc {
     font-size: 13px;
     color: var(--text-primary);
@@ -635,6 +546,132 @@ body {
     flex: 1;
     display: flex;
     min-height: 0;
+}
+
+/* Tab Navigation */
+.tab-navigation {
+    display: flex;
+    gap: 4px;
+    padding: 12px 20px 0;
+    background: rgba(11, 15, 25, 0.6);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tab-btn {
+    padding: 10px 20px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: var(--font-title);
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 2px solid transparent;
+    transition: all var(--transition-speed);
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(99, 102, 241, 0.05);
+}
+
+.tab-btn.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+/* Tab Content */
+.tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    flex-direction: column;
+}
+
+.tab-content.active {
+    display: flex;
+}
+
+/* Agent Panel */
+.agent-panel {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.agent-status-card {
+    background: rgba(19, 27, 46, 0.6);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-main);
+    padding: 16px;
+}
+
+.agent-status-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.agent-status-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.agent-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+}
+
+.agent-info-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.agent-info-value {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+/* Streaming Empty State */
+.streaming-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.streaming-empty-state i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.3;
+}
+
+.streaming-empty-state p {
+    font-size: 14px;
+    line-height: 1.6;
 }
 
 /* Log / Execution Panel */

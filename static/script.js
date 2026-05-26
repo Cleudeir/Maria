@@ -4,6 +4,7 @@ let editingFilePath = null;
 let executionLogAutoScroll = true;
 let expandedLogEntries = {};
 let renderedLogEntries = {};
+let currentActiveTab = 'logs';
 
 // Caching and state variables for performance optimization
 let lastTasksListJson = null;
@@ -12,6 +13,7 @@ let expandedFolders = {};
 let lastTaskDetailsJson = null;
 let activeTaskStatus = null;
 let lastRenderedStatus = null;
+let currentTaskMode = null;
 
 function isExecutionLogAtBottom() {
   const container = document.getElementById("execution-log");
@@ -21,6 +23,22 @@ function isExecutionLogAtBottom() {
     container.scrollHeight - container.scrollTop - container.clientHeight <=
     threshold
   );
+}
+
+// Tab Switching
+function switchTab(tabName) {
+  currentActiveTab = tabName;
+  
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.remove('active');
+  });
+  document.getElementById(`tab-${tabName}`).classList.add('active');
 }
 
 // On Load
@@ -210,36 +228,15 @@ async function getTaskDetails(taskId) {
 
     document.getElementById("active-task-step").innerText =
       `Step: ${task.step}`;
-
-    const supervisorBanner = document.getElementById("supervision-banner");
-    const showSupervisorPanel =
-      (task.status === "completed" || task.status === "failed") &&
-      task.supervision_status === "reviewed" &&
-      (task.supervision_review_summary || task.supervision_reason);
-
-    if (showSupervisorPanel) {
-      const bannerTitle = document.getElementById("supervision-title");
-      const statusLabel = document.getElementById("supervision-status");
-      const reasonLabel = document.getElementById("supervision-reason");
-      const timestampLabel = document.getElementById("supervision-timestamp");
-      const extraLabel = document.getElementById("supervision-extra");
-
-      const hasErrors = task.errors_encountered && task.errors_encountered.length > 0;
-      statusLabel.innerText = "REVIEWED";
-      statusLabel.className = `supervision-pill status-reviewed`;
-
-      bannerTitle.innerText = hasErrors ? "🛡️ Supervisor agindo após erro" : "Supervisor Final Analysis";
-      reasonLabel.innerText =
-        task.supervision_reason || "No supervisor reasoning available.";
-      timestampLabel.innerText = task.supervision_last_review
-        ? `Reviewed: ${new Date(task.supervision_last_review).toLocaleString()}`
-        : "";
-      extraLabel.innerText = task.supervision_review_summary || "";
-
-      supervisorBanner.style.display = "grid";
-    } else {
-      supervisorBanner.style.display = "none";
-    }
+    
+    // Update agent tab info
+    currentTaskMode = task.mode || 'auto';
+    const agentStepEl = document.getElementById("agent-current-step");
+    const agentStatusEl = document.getElementById("agent-current-status");
+    const agentModeEl = document.getElementById("agent-mode");
+    if (agentStepEl) agentStepEl.innerText = task.step || '-';
+    if (agentStatusEl) agentStatusEl.innerText = task.status.replace(/_/g, ' ');
+    if (agentModeEl) agentModeEl.innerText = currentTaskMode === 'step' ? 'Step-by-Step' : 'Auto-run';
 
     // Render streaming generation preview
     renderStreamingPanel(task);
@@ -320,6 +317,32 @@ function escapeHtml(text) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function renderStreamingPanel(task) {
+  const panel = document.getElementById("streaming-panel");
+  const contentEl = document.getElementById("streaming-content");
+  const emptyState = document.getElementById("streaming-empty");
+  if (!panel || !contentEl) return;
+
+  const isStreaming = Boolean(task.is_streaming);
+  if (!isStreaming) {
+    panel.style.display = "none";
+    contentEl.innerHTML = "";
+    if (emptyState) emptyState.style.display = "flex";
+    return;
+  }
+
+  panel.style.display = "flex";
+  if (emptyState) emptyState.style.display = "none";
+  let text = task.current_streaming_response || "Waiting for generation...";
+  if (
+    task.current_streaming_response &&
+    task.current_streaming_response.length > 200
+  ) {
+    text = "..." + task.current_streaming_response.slice(-200);
+  }
+  contentEl.innerHTML = escapeHtml(text).replace(/\n/g, "<br>");
 }
 
 function renderCollapsibleText(text) {
@@ -434,13 +457,8 @@ function renderExecutionLogs(log) {
       icon = '<i class="fa-solid fa-terminal"></i>';
     if (entry.role === "user_intervention")
       icon = '<i class="fa-solid fa-user-pen"></i>';
-    if (entry.role === "supervisor")
-      icon = '<i class="fa-solid fa-shield-halved"></i>';
 
     let titleText = titleRole;
-    if (entry.role === "supervisor" && entry.content && entry.content.includes("🛡️ Supervisor agindo após erro")) {
-      titleText = '<span style="color: #cf222e;">🛡️ SUPERVISOR AGINDO APÓS ERRO</span>';
-    }
 
     const usageBadge = entry.llm_usage
       ? `<span class="log-usage-badge">${escapeHtml(formatLlmUsage(entry.llm_usage))}</span>`
@@ -557,28 +575,6 @@ function renderLogContent(entry) {
 }
 
 // Render Workspace File Tree
-function renderStreamingPanel(task) {
-  const panel = document.getElementById("streaming-panel");
-  const contentEl = document.getElementById("streaming-content");
-  if (!panel || !contentEl) return;
-
-  const isStreaming = Boolean(task.is_streaming);
-  if (!isStreaming) {
-    panel.style.display = "none";
-    contentEl.innerHTML = "";
-    return;
-  }
-
-  panel.style.display = "flex";
-  let text = task.current_streaming_response || "Waiting for generation...";
-  if (
-    task.current_streaming_response &&
-    task.current_streaming_response.length > 200
-  ) {
-    text = "..." + task.current_streaming_response.slice(-200);
-  }
-  contentEl.innerHTML = escapeHtml(text).replace(/\n/g, "<br>");
-}
 
 function renderFileTree(nodes) {
   const fileTreeJson = JSON.stringify(nodes);

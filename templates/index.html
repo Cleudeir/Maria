@@ -128,44 +128,95 @@
             
             <div class="workspace-split">
                 
-                <!-- Left panel: logs and step cards -->
+                <!-- Left panel: tabs for logs, streaming, agent -->
                 <div style="flex: 1; display: flex; flex-direction: column; overflow-y: auto;">
-                    <div class="execution-panel" id="execution-log">
-                        <!-- Step log cards loaded dynamically -->
-                    </div>
-                    <div class="streaming-panel" id="streaming-panel" style="display: none;">
-                        <div class="streaming-header">
-                            <i class="fa-solid fa-circle-notch fa-spin"></i>
-                            <span>Generating response (last 200 chars shown)</span>
-                        </div>
-                        <div class="streaming-body" id="streaming-content"></div>
+                    
+                    <!-- Tab Navigation -->
+                    <div class="tab-navigation">
+                        <button class="tab-btn active" data-tab="logs" onclick="switchTab('logs')">
+                            <i class="fa-solid fa-scroll"></i> Logs
+                        </button>
+                        <button class="tab-btn" data-tab="streaming" onclick="switchTab('streaming')">
+                            <i class="fa-solid fa-bolt"></i> Streaming
+                        </button>
+                        <button class="tab-btn" data-tab="agent" onclick="switchTab('agent')">
+                            <i class="fa-solid fa-robot"></i> Agent
+                        </button>
                     </div>
                     
-                    <!-- Intervention Console -->
-                    <div class="intervention-console" id="intervention-console" style="display: none;">
-                        <div class="intervention-header">
-                            <div class="intervention-title">
-                                <i class="fa-solid fa-triangle-exclamation"></i> Action Required: Intervene in Execution
+                    <!-- Logs Tab -->
+                    <div class="tab-content active" id="tab-logs">
+                        <div class="execution-panel" id="execution-log">
+                            <!-- Step log cards loaded dynamically -->
+                        </div>
+                    </div>
+                    
+                    <!-- Streaming Tab -->
+                    <div class="tab-content" id="tab-streaming">
+                        <div class="streaming-panel" id="streaming-panel">
+                            <div class="streaming-header">
+                                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                                <span>Generating response (last 200 chars shown)</span>
                             </div>
+                            <div class="streaming-body" id="streaming-content"></div>
                         </div>
-                        
-                        <!-- Proposed Tool Edit Box -->
-                        <div class="proposed-tool-box" id="proposed-tool-container" style="display: none;">
-                            <div class="proposed-tool-header">Proposed Tool: <span id="proposed-tool-name"><i class="fa-solid fa-wrench"></i> write_file</span></div>
-                            <div class="form-label">Arguments JSON:</div>
-                            <textarea class="tool-args-edit" id="proposed-tool-args"></textarea>
+                        <div class="streaming-empty-state" id="streaming-empty">
+                            <i class="fa-solid fa-bolt"></i>
+                            <p>Streaming will appear when the agent is generating a response</p>
                         </div>
-                        
-                        <div class="intervention-actions">
-                            <button class="btn-intervention btn-approve" id="btn-approve-tool" onclick="submitIntervention('approve')">
-                                <i class="fa-solid fa-check"></i> Approve & Step
-                            </button>
-                            <button class="btn-intervention btn-modify" id="btn-modify-tool" onclick="submitIntervention('modify')">
-                                <i class="fa-solid fa-pen-to-square"></i> Modify & Run Tool
-                            </button>
-                            <button class="btn-intervention btn-continue" id="btn-continue" onclick="submitIntervention('continue')">
-                                <i class="fa-solid fa-forward"></i> Continue
-                            </button>
+                    </div>
+                    
+                    <!-- Agent Tab -->
+                    <div class="tab-content" id="tab-agent">
+                        <div class="agent-panel" id="agent-panel">
+                            <div class="agent-status-card" id="agent-status-card">
+                                <div class="agent-status-header">
+                                    <i class="fa-solid fa-robot"></i>
+                                    <span>Agent Status</span>
+                                </div>
+                                <div class="agent-status-body">
+                                    <div class="agent-info-row">
+                                        <span class="agent-info-label">Current Step:</span>
+                                        <span class="agent-info-value" id="agent-current-step">-</span>
+                                    </div>
+                                    <div class="agent-info-row">
+                                        <span class="agent-info-label">Status:</span>
+                                        <span class="agent-info-value" id="agent-current-status">-</span>
+                                    </div>
+                                    <div class="agent-info-row">
+                                        <span class="agent-info-label">Mode:</span>
+                                        <span class="agent-info-value" id="agent-mode">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Intervention Console moved to Agent tab -->
+                            <div class="intervention-console" id="intervention-console" style="display: none;">
+                                <div class="intervention-header">
+                                    <div class="intervention-title">
+                                        <i class="fa-solid fa-triangle-exclamation"></i> Action Required: Intervene in Execution
+                                    </div>
+                                </div>
+                                
+                                <!-- Proposed Tool Edit Box -->
+                                <div class="proposed-tool-box" id="proposed-tool-container" style="display: none;">
+                                    <div class="proposed-tool-header">Proposed Tool: <span id="proposed-tool-name"><i class="fa-solid fa-wrench"></i> write_file</span></div>
+                                    <div class="form-label">Arguments JSON:</div>
+                                    <textarea class="tool-args-edit" id="proposed-tool-args"></textarea>
+                                </div>
+                                
+                                <div class="intervention-actions">
+                                    <button class="btn-intervention btn-approve" id="btn-approve-tool" onclick="submitIntervention('approve')">
+                                        <i class="fa-solid fa-check"></i> Approve & Step
+                                    </button>
+                                    <button class="btn-intervention btn-modify" id="btn-modify-tool" onclick="submitIntervention('modify')">
+                                        <i class="fa-solid fa-pen-to-square"></i> Modify & Run Tool
+                                    </button>
+                                    <button class="btn-intervention btn-continue" id="btn-continue" onclick="submitIntervention('continue')">
+                                        <i class="fa-solid fa-forward"></i> Continue
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -185,19 +236,6 @@
                         <i class="fa-solid fa-folder-open" style="color: var(--text-muted);"></i>
                     </div>
 
-                    <div class="supervision-card" id="supervision-banner" style="display: none;">
-                        <div class="supervision-icon"><i class="fa-solid fa-shield-halved"></i></div>
-                        <div class="supervision-info">
-                            <div class="supervision-heading" id="supervision-title">Supervisor Review</div>
-                            <div class="supervision-meta-row">
-                                <span class="supervision-pill" id="supervision-status"></span>
-                                <span class="supervision-timestamp" id="supervision-timestamp"></span>
-                            </div>
-                            <div class="supervision-reason" id="supervision-reason"></div>
-                            <div class="supervision-extra" id="supervision-extra"></div>
-                        </div>
-                    </div>
-                    
                     <div class="file-tree-container" id="file-tree">
                         <!-- Loaded dynamically -->
                     </div>

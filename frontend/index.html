@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maria - Agent Control Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="brand">
+                <div class="brand-logo"><i class="fa-solid fa-brain-circuit"></i> MARIA</div>
+                <div class="brand-badge">slm</div>
+            </div>
+            <button class="btn-sidebar-close" id="btn-sidebar-close" aria-label="Close sidebar">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <button class="btn-new-task" id="btn-new-task">
+            <i class="fa-solid fa-plus"></i> New Agent Task
+        </button>
+        <div class="tasks-list-container">
+            <div class="tasks-list-title">Active / Past Tasks</div>
+            <div id="tasks-list"></div>
+        </div>
+        <div class="sidebar-footer">
+            <button class="btn-footer" id="btn-prompt">
+                <i class="fa-solid fa-sliders"></i> Prompt
+            </button>
+            <button class="btn-footer" id="btn-lessons">
+                <i class="fa-solid fa-graduation-cap"></i> Lessons
+            </button>
+        </div>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="main-workspace">
+        <div class="mobile-topbar">
+            <button class="btn-hamburger" id="btn-hamburger" aria-label="Open sidebar">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            <div class="brand">
+                <div class="brand-logo"><i class="fa-solid fa-brain-circuit"></i> MARIA</div>
+                <div class="brand-badge">slm</div>
+            </div>
+        </div>
+
+        <div class="welcome-view" id="welcome-view">
+            <div class="welcome-logo">🤖</div>
+            <div class="welcome-title">Maria Console</div>
+            <div class="welcome-subtitle">Welcome to the self-improving coding assistant dashboard. Run, monitor, and interact with agent tasks.</div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">Total Tasks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-rate">0%</div>
+                    <div class="stat-label">Success Rate</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-running">0</div>
+                    <div class="stat-label">Running</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-lessons">0</div>
+                    <div class="stat-label">Lessons Stored</div>
+                </div>
+            </div>
+            <button class="btn-action" id="btn-launch-task">
+                <i class="fa-solid fa-bolt"></i> Launch First Task
+            </button>
+        </div>
+
+        <div class="task-view" id="task-view" style="display: none;">
+            <div class="task-header">
+                <div class="task-header-left">
+                    <div class="task-header-title" id="active-task-desc"></div>
+                    <div class="task-header-meta">
+                        <span class="task-header-badge" id="active-task-status"></span>
+                        <span class="task-header-step" id="active-task-step"></span>
+                    </div>
+                </div>
+                <div class="task-header-actions">
+                    <button class="btn-action" id="btn-continue-task" style="display: none;">
+                        <i class="fa-solid fa-rotate"></i> Continue
+                    </button>
+                    <button class="btn-action" id="btn-finish-task">
+                        <i class="fa-solid fa-flag-checkered"></i> Finish Task
+                    </button>
+                    <button class="btn-action danger" id="btn-delete-task">
+                        <i class="fa-solid fa-trash-can"></i> Delete
+                    </button>
+                </div>
+                <div class="task-motivo" id="task-motivo" style="display: none;">
+                    <div class="task-motivo-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
+                    <div class="task-motivo-content">
+                        <div class="task-motivo-label">Motivo da Falha:</div>
+                        <div class="task-motivo-text" id="task-motivo-text"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="workspace-split">
+                <div class="left-panel">
+                    <div class="tab-navigation">
+                        <button class="tab-btn active" data-tab="logs">
+                            <i class="fa-solid fa-scroll"></i> Logs
+                        </button>
+                        <button class="tab-btn" data-tab="streaming">
+                            <i class="fa-solid fa-bolt"></i> Streaming
+                        </button>
+                        <button class="tab-btn" data-tab="agent">
+                            <i class="fa-solid fa-robot"></i> Agent
+                        </button>
+                    </div>
+
+                    <div class="tab-content active" id="tab-logs">
+                        <div class="execution-panel" id="execution-log"></div>
+                    </div>
+
+                    <div class="tab-content" id="tab-streaming">
+                        <div class="streaming-panel" id="streaming-panel" style="display: none;">
+                            <div class="streaming-header">
+                                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                                <span>Generating response (last 200 chars shown)</span>
+                            </div>
+                            <div class="streaming-body" id="streaming-content"></div>
+                        </div>
+                        <div class="streaming-empty-state" id="streaming-empty">
+                            <i class="fa-solid fa-bolt"></i>
+                            <p>Streaming will appear when the agent is generating a response</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-content" id="tab-agent">
+                        <div class="agent-panel">
+                            <div class="agent-status-card">
+                                <div class="agent-status-header">
+                                    <i class="fa-solid fa-robot"></i>
+                                    <span>Agent Status</span>
+                                </div>
+                                <div class="agent-status-body">
+                                    <div class="agent-info-row">
+                                        <span class="agent-info-label">Current Step:</span>
+                                        <span class="agent-info-value" id="agent-current-step">-</span>
+                                    </div>
+                                    <div class="agent-info-row">
+                                        <span class="agent-info-label">Status:</span>
+                                        <span class="agent-info-value" id="agent-current-status">-</span>
+                                    </div>
+                                    <div class="agent-info-row">
+                                        <span class="agent-info-label">Mode:</span>
+                                        <span class="agent-info-value" id="agent-mode">-</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="intervention-console" id="intervention-console" style="display: none;">
+                                <div class="intervention-header">
+                                    <div class="intervention-title">
+                                        <i class="fa-solid fa-triangle-exclamation"></i>
+                                        Action Required: Intervene in Execution
+                                    </div>
+                                </div>
+                                <div class="proposed-tool-box" id="proposed-tool-container" style="display: none;">
+                                    <div class="proposed-tool-header">
+                                        Proposed Tool: <span id="proposed-tool-name"></span>
+                                    </div>
+                                    <div class="form-label">Arguments JSON:</div>
+                                    <textarea class="tool-args-edit" id="proposed-tool-args"></textarea>
+                                </div>
+                                <div class="intervention-actions">
+                                    <button class="btn-intervention btn-approve" id="btn-approve-tool">
+                                        <i class="fa-solid fa-check"></i> Approve & Step
+                                    </button>
+                                    <button class="btn-intervention btn-modify" id="btn-modify-tool">
+                                        <i class="fa-solid fa-pen-to-square"></i> Modify & Run Tool
+                                    </button>
+                                    <button class="btn-intervention btn-continue" id="btn-intervene-continue">
+                                        <i class="fa-solid fa-forward"></i> Continue
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="task-chat-bar" id="task-chat-bar" style="display: none;">
+                        <textarea class="chat-bar-input" id="chat-bar-prompt" placeholder="Send a new instruction to the agent..." rows="2"></textarea>
+                        <button class="btn-chat-send" id="btn-chat-send">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="workspace-panel">
+                    <div class="workspace-header">
+                        <span>Workspace Files</span>
+                        <i class="fa-solid fa-folder-open"></i>
+                    </div>
+
+                    <div class="supervision-card" id="supervision-banner" style="display: none;">
+                        <div class="supervision-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                        <div class="supervision-info">
+                            <div class="supervision-heading" id="supervision-title">Supervisor Review</div>
+                            <div class="supervision-meta-row">
+                                <span class="supervision-pill" id="supervision-status"></span>
+                                <span class="supervision-timestamp" id="supervision-timestamp"></span>
+                            </div>
+                            <div class="supervision-reason" id="supervision-reason"></div>
+                            <div class="supervision-extra" id="supervision-extra"></div>
+                        </div>
+                    </div>
+
+                    <div class="file-tree-container" id="file-tree"></div>
+
+                    <div class="editor-container" id="editor-pane" style="display: none;">
+                        <div class="editor-header">
+                            <div class="editor-header-left">
+                                <span class="editor-filename" id="editor-filename"></span>
+                                <div class="editor-tabs" id="editor-tabs" style="display: none;">
+                                    <button class="btn-editor active" id="tab-code">Code</button>
+                                    <button class="btn-editor" id="tab-preview">Preview</button>
+                                </div>
+                            </div>
+                            <div class="editor-actions">
+                                <button class="btn-editor" id="btn-toggle-size" title="Maximize / Minimize">
+                                    <i class="fa-solid fa-angles-up"></i>
+                                </button>
+                                <button class="btn-editor" id="btn-fullscreen-preview" style="display: none;">
+                                    <i class="fa-solid fa-maximize"></i> Fullscreen
+                                </button>
+                                <button class="btn-editor" id="btn-new-tab-preview" style="display: none;">
+                                    <i class="fa-solid fa-up-right-from-square"></i> Open
+                                </button>
+                                <button class="btn-editor" id="btn-close-editor">Cancel</button>
+                                <button class="btn-editor btn-editor-save" id="btn-save-code">Save</button>
+                            </div>
+                        </div>
+                        <textarea class="editor-textarea" id="editor-textarea" spellcheck="false"></textarea>
+                        <iframe class="editor-preview" id="editor-preview" style="display: none;" sandbox="allow-scripts allow-same-origin"></iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-new-task">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title">Create New Agent Task</div>
+                <i class="fa-solid fa-xmark modal-close" id="close-modal-new-task"></i>
+            </div>
+            <div class="form-group">
+                <label class="form-label">What should Maria do?</label>
+                <textarea class="form-textarea" id="new-task-prompt" placeholder="e.g. Write a Python function to compute the N-th prime number..."></textarea>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Initial Execution Mode</label>
+                <select class="form-select" id="new-task-mode">
+                    <option value="auto">Auto-run, approve only sensitive commands</option>
+                    <option value="step">Step-by-Step (User Approvals)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Provider</label>
+                <select class="form-select" id="new-task-provider">
+                    <option value="llamacpp">LlamaCpp (Local)</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal" id="btn-cancel-new-task">Cancel</button>
+                <button class="btn-modal btn-modal-submit" id="btn-submit-new-task">Launch Task</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-system-prompt">
+        <div class="modal-box" style="width: 700px;">
+            <div class="modal-header">
+                <div class="modal-title">Edit System Prompt Memory</div>
+                <i class="fa-solid fa-xmark modal-close" id="close-modal-prompt"></i>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Current Guidelines Prompt</label>
+                <textarea class="form-textarea" id="system-prompt-text" style="height: 350px; font-family: var(--font-code); font-size: 12px;"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal" id="btn-cancel-prompt">Cancel</button>
+                <button class="btn-modal btn-modal-submit" id="btn-save-prompt">Save Prompts</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-lessons">
+        <div class="modal-box" style="width: 700px;">
+            <div class="modal-header">
+                <div class="modal-title">Lessons Learned Memory</div>
+                <i class="fa-solid fa-xmark modal-close" id="close-modal-lessons"></i>
+            </div>
+            <div class="form-group" style="max-height: 400px; overflow-y: auto;" id="lessons-list-container"></div>
+            <div class="modal-footer">
+                <button class="btn-modal" id="btn-close-lessons">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-finish-task">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title">Manually Finish Task</div>
+                <i class="fa-solid fa-xmark modal-close" id="close-modal-finish"></i>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Task Status Outcome</label>
+                <div class="outcome-selector-group">
+                    <button type="button" class="btn-outcome active" id="btn-outcome-completed">
+                        <i class="fa-solid fa-circle-check"></i> Completed (Success)
+                    </button>
+                    <button type="button" class="btn-outcome" id="btn-outcome-failed">
+                        <i class="fa-solid fa-circle-xmark"></i> Failed (Failure)
+                    </button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Completion Summary / Reason</label>
+                <textarea class="form-textarea" id="finish-task-reason" placeholder="Explain why you are finishing this task manually..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal" id="btn-cancel-finish">Cancel</button>
+                <button class="btn-modal btn-modal-submit" id="btn-submit-finish">Finish Task</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

@@ -23,7 +23,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from maria.llm import LLMClient as OllamaClient
 from maria.agents import parse_agent_response, MariaAgent
-from maria.agents.supervise_execution import supervise_task_result
 from maria.security import is_command_critical
 from maria.tools import ToolExecutor
 from maria.memory import (
@@ -360,16 +359,6 @@ def run_agent_step_sync(
         state["verification_report"] = None
     if "verification_verdict" not in state:
         state["verification_verdict"] = None
-    if "supervision_review_summary" not in state:
-        state["supervision_review_summary"] = None
-    if "supervision_status" not in state:
-        state["supervision_status"] = "idle"
-    if "supervision_reason" not in state:
-        state["supervision_reason"] = None
-    if "supervision_last_review" not in state:
-        state["supervision_last_review"] = None
-    if "supervision_log" not in state:
-        state["supervision_log"] = []
 
     if "stage_retries" not in state:
         state["stage_retries"] = 0
@@ -401,11 +390,6 @@ def run_agent_step_sync(
             state["is_streaming"] = False
             state["verification_report"] = None
             state["verification_verdict"] = None
-            state["supervision_review_summary"] = None
-            state["supervision_status"] = "idle"
-            state["supervision_reason"] = None
-            state["supervision_last_review"] = None
-            state["supervision_log"] = []
             state["errors_encountered"] = []
             state["details"] = None
             if user_prompt:
@@ -799,10 +783,29 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
             state["proposed_tool"] = None
             state["verification_report"] = report
             state["verification_verdict"] = verdict
-            state["stage"] = "supervisor_review"
-            state["stage_retries"] = 0
-            state["status"] = "running"
+            if state.get("verification_verdict") == "SUCCESS":
+                state["status"] = "completed"
+                state["details"] = "Verification passed."
+                try:
+                    add_task_history(
+                        MEMORY_DIR, state["task"], "SUCCESS", "Verification passed."
+                    )
+                except Exception:
+                    pass
+            else:
+                state["status"] = "failed"
+                state["details"] = f"Verification failed. Verdict: {state.get('verification_verdict')}"
+                try:
+                    add_task_history(
+                        MEMORY_DIR,
+                        state["task"],
+                        "FAILED",
+                        f"Verdict: {state.get('verification_verdict')}",
+                    )
+                except Exception:
+                    pass
             save_checkpoint(WORKSPACE_DIR, task_id, state)
+            trigger_self_improvement(task_id, state)
         except LoopDetectedError as e:
             state["stage_retries"] += 1
             if state["stage_retries"] >= MAX_STAGE_RETRIES:
@@ -821,85 +824,6 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
         except Exception as e:
             state["status"] = "failed"
             state["details"] = f"Failed to verify execution: {e}"
-            trigger_self_improvement(task_id, state)
-
-    elif state["stage"] == "supervisor_review":
-        try:
-            plan_for_supervisor = state.get("plan", "")
-            if state.get("last_user_intervention"):
-                plan_for_supervisor += f"\n\nAdditional instructions from user: {state['last_user_intervention']}"
-            review = supervise_task_result(
-                task=state.get("task", ""),
-                plan=plan_for_supervisor,
-                steps=state.get("steps", []),
-                completed_summaries=state.get("completed_step_summaries", []),
-                verification_report=state.get("verification_report", ""),
-                verdict=state.get("verification_verdict", ""),
-            )
-            has_errors = len(state.get("errors_encountered", [])) > 0
-            state["supervision_status"] = "reviewed"
-            state["supervision_reason"] = review["reason"]
-            state["supervision_review_summary"] = review.get("summary", "")
-            state["supervision_last_review"] = review["reviewed_at"]
-            state["execution_log"].append(
-                {
-                    "step": state["step"],
-                    "role": "supervisor",
-                    "content": f"🛡️ Supervisor agindo após {'erro' if has_errors else 'conclusão'}\n\nSupervisor Review: {review['reason']}\n{review.get('summary', '')}",
-                }
-            )
-            state["supervision_log"].append(
-                {
-                    "timestamp": review["reviewed_at"],
-                    "action": "review",
-                    "reason": review["reason"],
-                    "summary": review.get("summary", ""),
-                }
-            )
-            state["proposed_tool"] = None
-            if state.get("verification_verdict") == "SUCCESS":
-                state["status"] = "completed"
-                state["details"] = review["reason"]
-                try:
-                    add_task_history(
-                        MEMORY_DIR, state["task"], "SUCCESS", review["reason"][:200]
-                    )
-                except Exception:
-                    pass
-            else:
-                state["status"] = "failed"
-                state["details"] = (
-                    f"Verification failed. Verdict: {state.get('verification_verdict')}\n{review['reason']}"
-                )
-                try:
-                    add_task_history(
-                        MEMORY_DIR,
-                        state["task"],
-                        "FAILED",
-                        f"Verdict: {state.get('verification_verdict')} - {review['reason']}",
-                    )
-                except Exception:
-                    pass
-            save_checkpoint(WORKSPACE_DIR, task_id, state)
-            trigger_self_improvement(task_id, state)
-        except LoopDetectedError as e:
-            state["stage_retries"] += 1
-            if state["stage_retries"] >= MAX_STAGE_RETRIES:
-                state["status"] = "failed"
-                state["details"] = f"Failed to review execution: {e}"
-                trigger_self_improvement(task_id, state)
-            else:
-                state["details"] = (
-                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
-                )
-                state["status"] = "running"
-            print(
-                f"[Stage] supervisor_review loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
-                flush=True,
-            )
-        except Exception as e:
-            state["status"] = "failed"
-            state["details"] = f"Failed to review execution: {e}"
             trigger_self_improvement(task_id, state)
 
     save_task_state(task_id, state)
@@ -1244,6 +1168,10 @@ def background_execution_loop(task_id):
 
 @app.route("/")
 def index():
+    dist_index = os.path.join(BASE_DIR, "static", "dist", "index.html")
+    if os.path.exists(dist_index):
+        with open(dist_index, "r") as f:
+            return f.read()
     js_mtime = int(os.path.getmtime(os.path.join(BASE_DIR, "static", "script.js")))
     css_mtime = int(os.path.getmtime(os.path.join(BASE_DIR, "static", "style.css")))
     static_version = max(js_mtime, css_mtime)
@@ -1423,11 +1351,6 @@ def create_task():
         "is_streaming": False,
         "verification_report": None,
         "verification_verdict": None,
-        "supervision_review_summary": None,
-        "supervision_status": "idle",
-        "supervision_reason": None,
-        "supervision_last_review": None,
-        "supervision_log": [],
     }
 
     save_task_state(task_id, state)
@@ -1501,11 +1424,6 @@ def get_task(task_id):
                 "is_streaming": False,
                 "verification_report": None,
                 "verification_verdict": None,
-                "supervision_review_summary": None,
-                "supervision_status": "idle",
-                "supervision_reason": None,
-                "supervision_last_review": None,
-                "supervision_log": [],
             }
         else:
             return jsonify({"error": "Task not found"}), 404
@@ -1557,37 +1475,6 @@ def post_task_action(task_id):
                 "content": f"🏁 Task manually marked as {status.upper()}: {reason}",
             }
         )
-
-        try:
-            review = supervise_task_result(
-                task=state.get("task", ""),
-                plan=state.get("plan", ""),
-                steps=state.get("steps", []),
-                completed_summaries=state.get("completed_step_summaries", []),
-                verification_report=state.get("verification_report", "") or reason,
-                verdict="SUCCESS" if status == "completed" else "FAILED",
-            )
-            state["supervision_status"] = "reviewed"
-            state["supervision_reason"] = review["reason"]
-            state["supervision_review_summary"] = review.get("summary", "")
-            state["supervision_last_review"] = review["reviewed_at"]
-            state["execution_log"].append(
-                {
-                    "step": state.get("step", 0) + 2,
-                    "role": "supervisor",
-                    "content": f"🛡️ Supervisor agindo (force_complete)\n\nSupervisor Review: {review['reason']}\n{review.get('summary', '')}",
-                }
-            )
-            state["supervision_log"].append(
-                {
-                    "timestamp": review["reviewed_at"],
-                    "action": "review",
-                    "reason": review["reason"],
-                    "summary": review.get("summary", ""),
-                }
-            )
-        except Exception:
-            pass
 
         state["status"] = status
         state["details"] = reason
