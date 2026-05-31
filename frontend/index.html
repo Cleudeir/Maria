@@ -29,6 +29,9 @@
             <div id="tasks-list"></div>
         </div>
         <div class="sidebar-footer">
+            <button class="btn-footer" id="btn-theme-toggle">
+                <i class="fa-solid fa-moon"></i> Dark Mode
+            </button>
             <button class="btn-footer" id="btn-prompt">
                 <i class="fa-solid fa-sliders"></i> Prompt
             </button>
@@ -269,9 +272,17 @@
                 </select>
             </div>
             <div class="form-group">
+                <label class="form-label">Task Complexity</label>
+                <select class="form-select" id="new-task-complexity">
+                    <option value="simple">Simple - Do exactly what is asked, no extra architecture</option>
+                    <option value="complex" selected>Complex - Full implementation with proper architecture</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label class="form-label">Provider</label>
                 <select class="form-select" id="new-task-provider">
-                    <option value="llamacpp">LlamaCpp (Local)</option>
+                    <option value="llamacpp">LlamaCpp - Node 1 (192.168.20.180)</option>
+                    <option value="llamacpp_2">LlamaCpp - Node 2 (192.168.20.181)</option>
                 </select>
             </div>
             <div class="modal-footer">

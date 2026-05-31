@@ -18,8 +18,9 @@ def main():
     
     # Resolve absolute paths
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    workspace_dir = os.path.abspath(os.path.join(base_dir, args.workspace))
-    memory_dir = os.path.abspath(os.path.join(base_dir, args.memory))
+    project_root = os.path.dirname(base_dir)
+    workspace_dir = os.path.abspath(os.path.join(project_root, args.workspace))
+    memory_dir = os.path.abspath(os.path.join(project_root, args.memory))
     
     # Isolate task in separate folder if requested
     if args.isolate:

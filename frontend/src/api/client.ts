@@ -37,6 +37,7 @@ export const api = {
     task: string;
     mode: string;
     provider_type: string;
+    complexity: string;
   }) =>
     request<TaskDetailsResponse>('/api/tasks', {
       method: 'POST',

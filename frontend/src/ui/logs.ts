@@ -1,7 +1,8 @@
 import type { LogEntry } from '../types';
 import { getState, setState } from '../state/store';
 import { $, el } from '../utils/dom';
-import { escapeHtml, formatLlmUsage, getToolConfig, stripHtmlTags } from '../utils/formatters';
+import { escapeHtml, formatLlmUsage, getToolConfig } from '../utils/formatters';
+import { renderMarkdown } from '../utils/markdown';
 
 function getLogKey(entry: LogEntry): string {
   const step = entry.step ?? '';
@@ -62,7 +63,7 @@ function renderAssistantContent(content: string): string {
     }
   }
 
-  return `<div class="log-plain"><div class="log-collapsible-text">${escapeHtml(content)}</div></div>`;
+  return `<div class="log-markdown">${renderMarkdown(content)}</div>`;
 }
 
 function renderEntryBody(entry: LogEntry): string {
@@ -74,15 +75,15 @@ function renderEntryBody(entry: LogEntry): string {
     return `<div class="log-plain log-tool-result-text"><div class="log-collapsible-text">${escapeHtml(entry.content)}</div></div>`;
   }
 
-  return `<div style="font-size: 14px; line-height: 1.5;"><div class="log-collapsible-text">${escapeHtml(entry.content)}</div></div>`;
+  return `<div class="log-markdown">${renderMarkdown(entry.content)}</div>`;
 }
 
 function renderCollapsibleCard(bodyHtml: string, rawContent: string, entryKey: string): string {
   if (rawContent.length <= 300) return bodyHtml;
 
   const isExpanded = getState('expandedLogs').has(entryKey);
-  const previewText = stripHtmlTags(rawContent).slice(0, 300);
-  const preview = `${escapeHtml(previewText)}...`;
+  const previewText = rawContent.slice(0, 300);
+  const preview = `${renderMarkdown(previewText)}<span class="log-collipsis">...</span>`;
 
   return `
     <div class="log-collapsible-card">
@@ -145,18 +146,16 @@ export function renderLogs(logs: LogEntry[]): void {
 
   const currentId = getState('currentTaskId');
   if (container.dataset.taskId !== currentId) {
-    setState('renderedLogs', new Set());
     container.dataset.taskId = currentId ?? '';
-    container.innerHTML = '';
   }
 
   const preserveScroll = container.scrollTop;
+  container.innerHTML = '';
+  setState('renderedLogs', new Set());
   const rendered = getState('renderedLogs');
 
   for (const entry of logs) {
     const key = getLogKey(entry);
-    if (rendered.has(key)) continue;
-
     rendered.add(key);
     container.appendChild(renderCard(entry));
   }

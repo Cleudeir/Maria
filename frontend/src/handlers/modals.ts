@@ -1,5 +1,5 @@
 import type { FinishOutcome } from '../types';
-import { getState, setState } from '../state/store';
+import { getState, setState, selectTask } from '../state/store';
 import { $, toggleClass } from '../utils/dom';
 import { api } from '../api/client';
 import { fetchTaskDetails, loadTasksList } from './tasks';
@@ -35,18 +35,18 @@ export async function submitNewTask(): Promise<void> {
 
   const modeEl = $('#new-task-mode') as HTMLSelectElement | null;
   const providerEl = $('#new-task-provider') as HTMLSelectElement | null;
+  const complexityEl = $('#new-task-complexity') as HTMLSelectElement | null;
   const mode = modeEl?.value ?? 'auto';
   const provider = providerEl?.value ?? 'llamacpp';
+  const complexity = complexityEl?.value ?? 'complex';
 
   closeAllModals();
 
   try {
-    const task = await api.createTask({ task: prompt, mode, provider_type: provider });
+    const task = await api.createTask({ task: prompt, mode, provider_type: provider, complexity });
 
     if (promptEl) promptEl.value = '';
     if (providerEl) providerEl.value = 'llamacpp';
-
-    const { selectTask } = await import('../state/store');
     selectTask(task.task_id);
     await fetchTaskDetails(task.task_id);
     await loadTasksList();
