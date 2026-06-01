@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Callable
 
+from maria.compact_context import compact_messages, total_tokens
+
 
 class LoopDetectedError(Exception):
     pass
@@ -91,6 +93,10 @@ class LLMProvider(ABC):
     ) -> str:
         ...
 
+    @property
+    def max_context_window(self) -> int:
+        return 32768
+
     def chat(
         self,
         messages: List[Dict[str, str]],
@@ -98,6 +104,14 @@ class LLMProvider(ABC):
         stop: Optional[List[str]] = None,
         stream_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
+        if total_tokens(messages) > int(self.max_context_window * 0.5):
+            compacted = compact_messages(
+                messages,
+                token_budget=int(self.max_context_window * 0.45),
+                max_context_tokens=self.max_context_window,
+            )
+            if compacted is not messages:
+                messages = compacted
         system_text, user_text = self._format_messages(messages)
         return self.generate(system_text, user_text, progress_callback=stream_callback)
 

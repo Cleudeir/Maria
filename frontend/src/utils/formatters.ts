@@ -1,16 +1,19 @@
 import type { LlmUsage, ToolConfig } from '../types';
 
 const TOOL_CONFIG: Record<string, ToolConfig> = {
-  list_dir:      { icon: 'fa-solid fa-folder-open',  color: '#3b82f6' },
-  read_file:     { icon: 'fa-solid fa-file-lines',   color: '#06b6d4' },
-  write_file:    { icon: 'fa-solid fa-pen-to-square', color: '#10b981' },
-  edit_file:     { icon: 'fa-solid fa-pen',           color: '#f59e0b' },
-  edit_lines:    { icon: 'fa-solid fa-lines-leaning', color: '#f59e0b' },
-  grep:          { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
-  find_in_files: { icon: 'fa-solid fa-search',        color: '#a855f7' },
-  grep_output:   { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
-  run_command:   { icon: 'fa-solid fa-terminal',      color: '#ef4444' },
-  finish_task:   { icon: 'fa-solid fa-flag-checkered', color: '#10b981' },
+  list_dir:          { icon: 'fa-solid fa-folder-open',     color: '#3b82f6' },
+  read_file:         { icon: 'fa-solid fa-file-lines',      color: '#06b6d4' },
+  write_file:        { icon: 'fa-solid fa-pen-to-square',   color: '#10b981' },
+  edit_file:         { icon: 'fa-solid fa-pen',             color: '#f59e0b' },
+  edit_lines:        { icon: 'fa-solid fa-lines-leaning',   color: '#f59e0b' },
+  grep:              { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
+  find_in_files:     { icon: 'fa-solid fa-search',          color: '#a855f7' },
+  grep_output:       { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
+  run_command:       { icon: 'fa-solid fa-terminal',        color: '#ef4444' },
+  start_http_server: { icon: 'fa-solid fa-server',          color: '#0ea5e9' },
+  stop_http_server:  { icon: 'fa-solid fa-stop',            color: '#f43f5e' },
+  list_http_servers: { icon: 'fa-solid fa-list-ul',         color: '#0ea5e9' },
+  finish_task:       { icon: 'fa-solid fa-flag-checkered',  color: '#10b981' },
 };
 
 export function getToolConfig(name: string): ToolConfig {

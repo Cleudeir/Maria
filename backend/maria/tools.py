@@ -1,7 +1,11 @@
 import os
 import re
+import select
+import socket
 import subprocess
 import signal
+import sys
+import threading
 import time
 from maria.security import is_path_safe, is_command_critical, prompt_user_approval
 
@@ -77,10 +81,124 @@ def terminate_task_process_groups(task_id: str):
             pass
 
 
+# Track HTTP servers started by the agent so they can be stopped/killed.
+# Structure: { task_id: { server_id: { "port": int, "process": Popen, "path": str, "started_at": float } } }
+task_http_servers: dict = {}
+_http_server_lock = threading.Lock()
+_http_server_counter = 0
+
+
+def _allocate_server_id(task_id: str) -> str:
+    global _http_server_counter
+    with _http_server_lock:
+        _http_server_counter += 1
+        return f"srv_{task_id or 'global'}_{_http_server_counter}"
+
+
+def _is_port_free(port: int, host: str = "0.0.0.0") -> bool:
+    """Check if a TCP port is free on the given host."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            return True
+    except OSError:
+        return False
+
+
+def list_http_servers(task_id: str | None = None) -> list:
+    """
+    Return a list of dictionaries describing active HTTP servers.
+    If task_id is provided, only servers started for that task are returned.
+    """
+    with _http_server_lock:
+        result = []
+        for tid, servers in task_http_servers.items():
+            if task_id and tid != task_id:
+                continue
+            for sid, info in servers.items():
+                proc = info.get("process")
+                if proc and proc.poll() is not None:
+                    continue
+                result.append(
+                    {
+                        "server_id": sid,
+                        "task_id": tid,
+                        "port": info.get("port"),
+                        "path": info.get("path"),
+                        "url": f"http://localhost:{info.get('port')}/",
+                        "started_at": info.get("started_at"),
+                        "alive": True,
+                    }
+                )
+        return result
+
+
+def stop_http_server(server_id: str, task_id: str | None = None) -> bool:
+    """Stop a single HTTP server by id. Returns True if it was running and stopped."""
+    with _http_server_lock:
+        if task_id:
+            servers = task_http_servers.get(task_id, {})
+            info = servers.pop(server_id, None)
+        else:
+            info = None
+            for tid, servers in task_http_servers.items():
+                if server_id in servers:
+                    info = servers.pop(server_id)
+                    task_id = tid
+                    break
+        if not info:
+            return False
+        if not servers and task_id:
+            task_http_servers.pop(task_id, None)
+
+    proc = info.get("process")
+    if not proc:
+        return False
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    return True
+
+
+def terminate_task_http_servers(task_id: str) -> int:
+    """Stop all HTTP servers belonging to a task. Returns the count of stopped servers."""
+    with _http_server_lock:
+        servers = task_http_servers.pop(task_id, None)
+    if not servers:
+        return 0
+    count = 0
+    for sid, info in list(servers.items()):
+        proc = info.get("process")
+        if not proc:
+            continue
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+            count += 1
+        except Exception:
+            pass
+    return count
+
+
 class ToolExecutor:
-    def __init__(self, workspace_dir: str, task_id: str = None):
+    def __init__(self, workspace_dir: str, task_id: str = None, output_callback=None):
         self.workspace_dir = os.path.abspath(workspace_dir)
         self.task_id = task_id
+        self.output_callback = output_callback
         # Ensure workspace directory exists
         os.makedirs(self.workspace_dir, exist_ok=True)
         os.makedirs(os.path.join(self.workspace_dir, "output"), exist_ok=True)
@@ -447,6 +565,8 @@ class ToolExecutor:
         except Exception as e:
             return f"Error: Failed to edit file: {e}"
 
+    COMMAND_TIMEOUT = 600
+
     def run_command(self, command: str) -> str:
         """
         Runs command inside the workspace output directory, with security controls.
@@ -474,6 +594,9 @@ class ToolExecutor:
             # On POSIX, the process PID becomes the process group ID after setsid.
             pgid = None
 
+        start_time = time.time()
+        deadline = start_time + self.COMMAND_TIMEOUT
+
         try:
             process = subprocess.Popen(
                 command,
@@ -481,7 +604,8 @@ class ToolExecutor:
                 cwd=output_dir,
                 text=True,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
                 preexec_fn=preexec_fn,
                 creationflags=creationflags,
             )
@@ -490,20 +614,28 @@ class ToolExecutor:
                 pgid = process.pid
                 register_task_process_group(self.task_id, pgid)
 
-            stdout, stderr = process.communicate(timeout=300)
-            output = ""
-            if stdout:
-                output += stdout
-            if stderr:
-                output += f"\nStderr:\n{stderr}"
+            output_lines = []
+            timed_out = False
 
-            if process.returncode != 0:
-                return f"Error: Command exited with code {process.returncode}.\nOutput:\n{output.strip()}"
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    timed_out = True
+                    break
 
-            return f"Success: Command executed successfully.\nOutput:\n{output.strip()}"
+                rlist, _, _ = select.select([process.stdout], [], [], min(remaining, 0.5))
+                if rlist:
+                    line = process.stdout.readline()
+                    if not line:
+                        break
+                    output_lines.append(line)
+                    if self.output_callback:
+                        self.output_callback(line.rstrip("\n"))
 
-        except subprocess.TimeoutExpired:
-            if process is not None:
+            process.stdout.close()
+            process.wait(timeout=5)
+
+            if timed_out:
                 try:
                     if pgid is not None:
                         if os.name == "nt":
@@ -513,9 +645,183 @@ class ToolExecutor:
                     process.kill()
                 except Exception:
                     pass
-            return "Error: Command timed out after 300 seconds."
+                elapsed = time.time() - start_time
+                return f"Error: Command timed out after {elapsed:.1f}s (limit {self.COMMAND_TIMEOUT}s)."
+
+            elapsed = time.time() - start_time
+            output = "".join(output_lines)
+            header = (
+                f"━━━ Command ━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  $ {command}\n"
+                f"  Directory: {output_dir}\n"
+                f"  Duration: {elapsed:.1f}s\n"
+                f"  Exit code: {process.returncode}\n"
+                f"━━━ Output ━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            )
+            full = header + output
+            if process.returncode != 0:
+                return f"Error: Command exited with code {process.returncode}.\n{full.strip()}"
+            return f"Success: Command executed successfully.\n{full.strip()}"
+
         except Exception as e:
-            return f"Error: Failed to run command: {e}"
+            elapsed = time.time() - start_time
+            try:
+                if pgid is not None:
+                    if os.name == "nt":
+                        process.send_signal(signal.SIGTERM)
+                    else:
+                        os.killpg(pgid, signal.SIGTERM)
+                if process:
+                    process.kill()
+            except Exception:
+                pass
+            return f"Error: Command failed after {elapsed:.1f}s: {e}"
         finally:
             if self.task_id and pgid is not None:
                 unregister_task_process_group(self.task_id, pgid)
+
+    DEFAULT_HTTP_PORT = 10010
+    MAX_HTTP_PORT = 65535
+    MIN_HTTP_PORT = 1
+
+    def start_http_server(self, port: int = None, path: str = ".") -> str:
+        """
+        Starts a local HTTP server so the user can browse the HTML / static files
+        produced by the agent (typically files inside workspace/output/).
+
+        Args:
+            port: TCP port to listen on. Defaults to 10010.
+            path: Directory (relative to workspace/output) to serve. Defaults to '.'.
+
+        Returns a description of the server with its URL.
+        """
+        try:
+            if port is None:
+                port = self.DEFAULT_HTTP_PORT
+            port = int(port)
+        except (TypeError, ValueError):
+            return f"Error: Invalid port '{port}'. Must be an integer between {self.MIN_HTTP_PORT} and {self.MAX_HTTP_PORT}."
+
+        if not (self.MIN_HTTP_PORT <= port <= self.MAX_HTTP_PORT):
+            return f"Error: Port {port} is out of range ({self.MIN_HTTP_PORT}-{self.MAX_HTTP_PORT})."
+
+        target_dir, error = self._resolve_output_path(path)
+        if error:
+            return error
+        if not os.path.isdir(target_dir):
+            return f"Error: Serve path '{path}' is not a directory."
+
+        server_id = _allocate_server_id(self.task_id or "global")
+        host = "0.0.0.0"
+
+        if not _is_port_free(port, host):
+            for fallback in range(port, min(port + 20, self.MAX_HTTP_PORT)):
+                if _is_port_free(fallback, host):
+                    return (
+                        f"Error: Port {port} is already in use. "
+                        f"Try port {fallback} (it appears to be free) or stop the process bound to {port}."
+                    )
+            return f"Error: Port {port} is already in use and no nearby port is free."
+
+        log_path = os.path.join(self.workspace_dir, f"http_server_{server_id}.log")
+        log_file = open(log_path, "w", encoding="utf-8")
+
+        cmd = [
+            sys.executable,
+            "-u",
+            "-m",
+            "http.server",
+            str(port),
+            "--bind",
+            host,
+            "--directory",
+            target_dir,
+        ]
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=target_dir,
+                preexec_fn=os.setsid if os.name != "nt" else None,
+            )
+        except Exception as e:
+            log_file.close()
+            return f"Error: Failed to start HTTP server: {e}"
+
+        deadline = time.time() + 5.0
+        alive = False
+        while time.time() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(0.1)
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.3)
+                    if s.connect_ex(("127.0.0.1", port)) == 0:
+                        alive = True
+                        break
+            except OSError:
+                continue
+
+        if not alive:
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            log_file.close()
+            try:
+                with open(log_path, "r", encoding="utf-8") as f:
+                    tail = f.read()[-400:]
+            except Exception:
+                tail = ""
+            return (
+                f"Error: HTTP server failed to start on port {port} within 5 seconds. "
+                f"Log tail: {tail or '(empty)'}"
+            )
+
+        with _http_server_lock:
+            task_bucket = task_http_servers.setdefault(self.task_id or "global", {})
+            task_bucket[server_id] = {
+                "port": port,
+                "process": process,
+                "path": path,
+                "started_at": time.time(),
+            }
+
+        rel_display = os.path.relpath(target_dir, self.workspace_dir)
+        return (
+            f"Success: HTTP server is running.\n"
+            f"  server_id: {server_id}\n"
+            f"  port: {port}\n"
+            f"  serving: {rel_display}\n"
+            f"  url: http://localhost:{port}/\n"
+            f"  The user can now open the URL in a browser to test the generated HTML.\n"
+            f"  The server will be stopped automatically when this task is deleted."
+        )
+
+    def stop_http_server(self, server_id: str) -> str:
+        """
+        Stops a previously started HTTP server by its id.
+        Use list_http_servers to discover active server ids.
+        """
+        if not server_id:
+            return "Error: server_id is required."
+        if stop_http_server(server_id, self.task_id):
+            return f"Success: HTTP server '{server_id}' stopped."
+        return f"Error: No active HTTP server with id '{server_id}' was found."
+
+    def list_http_servers(self) -> str:
+        """
+        Lists all HTTP servers started by the current task (or by all tasks if global).
+        """
+        servers = list_http_servers(self.task_id)
+        if not servers:
+            return "No active HTTP servers."
+        lines = []
+        for s in servers:
+            lines.append(
+                f"- server_id={s['server_id']} port={s['port']} path={s['path']} url={s['url']}"
+            )
+        return "Active HTTP servers:\n" + "\n".join(lines)

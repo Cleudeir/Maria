@@ -31,11 +31,18 @@ class SelfImprovementAgent:
 
         existing_lessons = load_lessons(self.memory_dir)
 
-        # Format the log and errors for context
+        # Format the log and errors for context (with truncation to avoid exceeding context window)
         trace_str = ""
+        trace_char_limit = 30000
         for turn in execution_log:
             role = "Agent" if turn["role"] == "assistant" else "Tool/System"
-            trace_str += f"\n[{role}]:\n{turn['content']}\n"
+            content = turn['content']
+            if len(content) > 500:
+                content = content[:250] + "\n... [truncated] ...\n" + content[-250:]
+            trace_str += f"\n[{role}]:\n{content}\n"
+            if len(trace_str) > trace_char_limit:
+                trace_str = trace_str[:trace_char_limit] + "\n... [trace truncated due to length] ...\n"
+                break
 
         errors_str = ""
         if errors:
@@ -43,8 +50,11 @@ class SelfImprovementAgent:
                 errors_str += f"\nError {i}:\n"
                 if "tool" in err:
                     errors_str += f"  Tool: {err['tool']}\n"
-                    errors_str += f"  Arguments: {err['args']}\n"
-                errors_str += f"  Message: {err.get('error') or err.get('message')}\n"
+                    errors_str += f"  Arguments: {str(err['args'])[:200]}\n"
+                errors_str += f"  Message: {(err.get('error') or err.get('message'))[:500]}\n"
+                if len(errors_str) > 5000:
+                    errors_str += "\n... [remaining errors omitted] ...\n"
+                    break
         else:
             errors_str = (
                 "None. The task completed successfully without tool or formatting errors."
@@ -59,7 +69,8 @@ class SelfImprovementAgent:
             existing_lessons_str = "No lessons learned logged yet."
 
         # Meta prompt
-        meta_prompt = f"""You are the Self-Improvement Meta-Agent for Maria (an agentic AI assistant powered by Qwen 3.5 4B).
+        # Estimate total meta_prompt size; if too large, truncate further
+        meta_prompt_preview = f"""You are the Self-Improvement Meta-Agent for Maria (an agentic AI assistant powered by Qwen 3.5 4B).
 Your job is to analyze the agent's performance on its last task and help it improve.
 
 Here is the task Maria worked on:

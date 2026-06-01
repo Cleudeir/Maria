@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="./styles/main.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
     <div class="sidebar" id="sidebar">
@@ -25,8 +26,18 @@
             <i class="fa-solid fa-plus"></i> New Agent Task
         </button>
         <div class="tasks-list-container">
-            <div class="tasks-list-title">Active / Past Tasks</div>
+            <div class="tasks-list-header">
+                <div class="tasks-list-title">Active / Past Tasks</div>
+                <button class="btn-batch-toggle" id="btn-batch-toggle" title="Batch delete mode">
+                    <i class="fa-solid fa-layer-group"></i>
+                </button>
+            </div>
             <div id="tasks-list"></div>
+            <div class="batch-actions" id="batch-actions" style="display: none;">
+                <button class="btn-batch-delete" id="btn-batch-delete">
+                    <i class="fa-solid fa-trash-can"></i> Delete Selected (<span id="selected-count">0</span>)
+                </button>
+            </div>
         </div>
         <div class="sidebar-footer">
             <button class="btn-footer" id="btn-theme-toggle">
@@ -37,6 +48,9 @@
             </button>
             <button class="btn-footer" id="btn-lessons">
                 <i class="fa-solid fa-graduation-cap"></i> Lessons
+            </button>
+            <button class="btn-footer" id="btn-pipeline-page">
+                <i class="fa-solid fa-sitemap"></i> Pipeline
             </button>
         </div>
     </div>
@@ -54,10 +68,26 @@
             </div>
         </div>
 
-        <div class="welcome-view" id="welcome-view">
-            <div class="welcome-logo">🤖</div>
-            <div class="welcome-title">Maria Console</div>
-            <div class="welcome-subtitle">Welcome to the self-improving coding assistant dashboard. Run, monitor, and interact with agent tasks.</div>
+        <header class="page-header" id="page-header">
+            <div class="page-header-brand">
+                <i class="fa-solid fa-brain-circuit"></i>
+                <span>MARIA</span>
+                <span class="page-header-badge">slm</span>
+            </div>
+            <nav class="page-header-nav">
+                <a class="page-header-link" id="header-link-pipeline" data-navigo href="/pipeline">
+                    <i class="fa-solid fa-sitemap"></i> Pipeline
+                </a>
+                <a class="page-header-link" id="header-link-tasks" data-navigo href="/task">
+                    <i class="fa-solid fa-list-check"></i> Tasks
+                </a>
+            </nav>
+        </header>
+
+        <div class="home-view" id="home-view" style="display: none;">
+            <div class="home-logo">🤖</div>
+            <div class="home-title">Maria Console</div>
+            <div class="home-subtitle">Welcome to the self-improving coding assistant dashboard. Run, monitor, and interact with agent tasks.</div>
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-value" id="stat-total">0</div>
@@ -81,6 +111,10 @@
             </button>
         </div>
 
+        <div class="pipeline-view" id="pipeline-view" style="display: none;">
+            <div class="pipeline-view-content" id="pipeline-view-container"></div>
+        </div>
+
         <div class="task-view" id="task-view" style="display: none;">
             <div class="task-header">
                 <div class="task-header-left">
@@ -91,6 +125,12 @@
                     </div>
                 </div>
                 <div class="task-header-actions">
+                    <button class="btn-action" id="btn-preview-html" style="display: none;">
+                        <i class="fa-solid fa-eye"></i> Preview
+                    </button>
+                    <button class="btn-action" id="btn-test-server" style="display: none;">
+                        <i class="fa-solid fa-server"></i> Test Server
+                    </button>
                     <button class="btn-action" id="btn-continue-task" style="display: none;">
                         <i class="fa-solid fa-rotate"></i> Continue
                     </button>
@@ -100,6 +140,13 @@
                     <button class="btn-action danger" id="btn-delete-task">
                         <i class="fa-solid fa-trash-can"></i> Delete
                     </button>
+                </div>
+                <div class="task-servers-card" id="task-servers-card" style="display: none;">
+                    <div class="task-servers-header">
+                        <i class="fa-solid fa-server"></i>
+                        <span>Active Test Servers</span>
+                    </div>
+                    <div class="task-servers-list" id="task-servers-list"></div>
                 </div>
                 <div class="task-motivo" id="task-motivo" style="display: none;">
                     <div class="task-motivo-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
@@ -121,6 +168,9 @@
                         </button>
                         <button class="tab-btn" data-tab="agent">
                             <i class="fa-solid fa-robot"></i> Agent
+                        </button>
+                        <button class="tab-btn" data-tab="workspace">
+                            <i class="fa-solid fa-folder-tree"></i> Workspace Files
                         </button>
                     </div>
 
@@ -194,62 +244,68 @@
                         </div>
                     </div>
 
-                    <div class="task-chat-bar" id="task-chat-bar" style="display: none;">
-                        <textarea class="chat-bar-input" id="chat-bar-prompt" placeholder="Send a new instruction to the agent..." rows="2"></textarea>
-                        <button class="btn-chat-send" id="btn-chat-send">
-                            <i class="fa-solid fa-paper-plane"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="workspace-panel">
-                    <div class="workspace-header">
-                        <span>Workspace Files</span>
-                        <i class="fa-solid fa-folder-open"></i>
-                    </div>
-
-                    <div class="supervision-card" id="supervision-banner" style="display: none;">
-                        <div class="supervision-icon"><i class="fa-solid fa-shield-halved"></i></div>
-                        <div class="supervision-info">
-                            <div class="supervision-heading" id="supervision-title">Supervisor Review</div>
-                            <div class="supervision-meta-row">
-                                <span class="supervision-pill" id="supervision-status"></span>
-                                <span class="supervision-timestamp" id="supervision-timestamp"></span>
-                            </div>
-                            <div class="supervision-reason" id="supervision-reason"></div>
-                            <div class="supervision-extra" id="supervision-extra"></div>
-                        </div>
-                    </div>
-
-                    <div class="file-tree-container" id="file-tree"></div>
-
-                    <div class="editor-container" id="editor-pane" style="display: none;">
-                        <div class="editor-header">
-                            <div class="editor-header-left">
-                                <span class="editor-filename" id="editor-filename"></span>
-                                <div class="editor-tabs" id="editor-tabs" style="display: none;">
-                                    <button class="btn-editor active" id="tab-code">Code</button>
-                                    <button class="btn-editor" id="tab-preview">Preview</button>
+                    <div class="tab-content" id="tab-workspace">
+                        <div class="workspace-body">
+                            <div class="workspace-left">
+                                <div class="workspace-header">
+                                    <span>Workspace Files</span>
+                                    <button class="btn-open-folder" id="btn-open-folder" title="Open folder in file explorer">
+                                        <i class="fa-solid fa-folder-open"></i>
+                                    </button>
                                 </div>
+
+                                <div class="supervision-card" id="supervision-banner" style="display: none;">
+                                    <div class="supervision-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                                    <div class="supervision-info">
+                                        <div class="supervision-heading" id="supervision-title">Supervisor Review</div>
+                                        <div class="supervision-meta-row">
+                                            <span class="supervision-pill" id="supervision-status"></span>
+                                            <span class="supervision-timestamp" id="supervision-timestamp"></span>
+                                        </div>
+                                        <div class="supervision-reason" id="supervision-reason"></div>
+                                        <div class="supervision-extra" id="supervision-extra"></div>
+                                    </div>
+                                </div>
+
+                                <div class="file-tree-container" id="file-tree"></div>
                             </div>
-                            <div class="editor-actions">
-                                <button class="btn-editor" id="btn-toggle-size" title="Maximize / Minimize">
-                                    <i class="fa-solid fa-angles-up"></i>
-                                </button>
-                                <button class="btn-editor" id="btn-fullscreen-preview" style="display: none;">
-                                    <i class="fa-solid fa-maximize"></i> Fullscreen
-                                </button>
-                                <button class="btn-editor" id="btn-new-tab-preview" style="display: none;">
-                                    <i class="fa-solid fa-up-right-from-square"></i> Open
-                                </button>
-                                <button class="btn-editor" id="btn-close-editor">Cancel</button>
-                                <button class="btn-editor btn-editor-save" id="btn-save-code">Save</button>
+
+                            <div class="editor-container" id="editor-pane" style="display: none;">
+                                <div class="editor-header">
+                                    <div class="editor-header-left">
+                                        <span class="editor-filename" id="editor-filename"></span>
+                                        <div class="editor-tabs" id="editor-tabs" style="display: none;">
+                                            <button class="btn-editor active" id="tab-code">Code</button>
+                                            <button class="btn-editor" id="tab-preview">Preview</button>
+                                        </div>
+                                    </div>
+                                    <div class="editor-actions">
+                                        <button class="btn-editor" id="btn-toggle-size" title="Maximize / Minimize">
+                                            <i class="fa-solid fa-angles-up"></i>
+                                        </button>
+                                        <button class="btn-editor" id="btn-fullscreen-preview" style="display: none;">
+                                            <i class="fa-solid fa-maximize"></i> Fullscreen
+                                        </button>
+                                        <button class="btn-editor" id="btn-new-tab-preview" style="display: none;">
+                                            <i class="fa-solid fa-up-right-from-square"></i> Open
+                                        </button>
+                                        <button class="btn-editor" id="btn-close-editor">Cancel</button>
+                                        <button class="btn-editor btn-editor-save" id="btn-save-code">Save</button>
+                                    </div>
+                                </div>
+                                <textarea class="editor-textarea" id="editor-textarea" spellcheck="false"></textarea>
+                                <iframe class="editor-preview" id="editor-preview" style="display: none;" sandbox="allow-scripts allow-same-origin"></iframe>
                             </div>
                         </div>
-                        <textarea class="editor-textarea" id="editor-textarea" spellcheck="false"></textarea>
-                        <iframe class="editor-preview" id="editor-preview" style="display: none;" sandbox="allow-scripts allow-same-origin"></iframe>
                     </div>
                 </div>
+            </div>
+
+            <div class="task-chat-bar" id="task-chat-bar" style="display: none;">
+                <textarea class="chat-bar-input" id="chat-bar-prompt" placeholder="Send a new instruction to the agent..." rows="2"></textarea>
+                <button class="btn-chat-send" id="btn-chat-send">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
             </div>
         </div>
     </div>

@@ -1,4 +1,4 @@
-export type TabName = 'logs' | 'streaming' | 'agent';
+export type TabName = 'logs' | 'streaming' | 'agent' | 'workspace';
 export type EditorTab = 'code' | 'preview';
 export type FinishOutcome = 'completed' | 'failed';
 export type InterventionAction = 'approve' | 'modify' | 'continue';
@@ -36,6 +36,8 @@ export interface Task {
   task: string;
   status: TaskStatus;
   step: number;
+  stage?: string;
+  stage_retries?: number;
   created_at?: string;
   mode?: string;
   execution_log?: LogEntry[];
@@ -43,6 +45,7 @@ export interface Task {
   proposed_tool?: ProposedTool | null;
   is_streaming?: boolean;
   current_streaming_response?: string;
+  current_command_output?: string;
   details?: string;
   supervision_status?: string;
   supervision_review_summary?: string;
@@ -92,6 +95,20 @@ export interface PromptResponse {
 export interface ToolConfig {
   icon: string;
   color: string;
+}
+
+export interface HttpServerInfo {
+  server_id: string;
+  task_id: string;
+  port: number;
+  path: string;
+  url: string;
+  started_at: number;
+  alive: boolean;
+}
+
+export interface HttpServersResponse {
+  servers: HttpServerInfo[];
 }
 
 export type TaskStatus =

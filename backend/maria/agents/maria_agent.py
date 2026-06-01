@@ -59,8 +59,8 @@ class MariaAgent:
             complexity=complexity,
         )
 
-    def verify_execution(self, plan: str, steps: List[str], stream_callback=None) -> Tuple[str, str]:
-        return verify_execution(self.workspace_dir, plan, steps, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
+    def verify_execution(self, plan: str, steps: List[str], stream_callback=None, complexity: str = "complex") -> Tuple[str, str]:
+        return verify_execution(self.workspace_dir, plan, steps, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback, complexity=complexity)
 
     def run(self, task: str, max_steps: int = 20) -> bool:
         """
@@ -168,7 +168,7 @@ class MariaAgent:
             }
         )
 
-        verdict, analysis_report = self.verify_execution(plan, steps)
+        verdict, analysis_report = self.verify_execution(plan, steps, complexity=complexity)
         print(f"Analysis Report:\n{analysis_report}\n")
         print(f"Final Verdict: {verdict}")
 

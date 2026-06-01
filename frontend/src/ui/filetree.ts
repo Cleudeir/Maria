@@ -5,6 +5,14 @@ import { openFileEditor } from './editor';
 
 let lastTreeJson = '';
 
+export function initOpenFolderButton(): void {
+  $('#btn-open-folder')?.addEventListener('click', () => {
+    const currentTaskId = getState('currentTaskId');
+    if (!currentTaskId) return;
+    window.open(`http://192.168.20.180:10002/tasks/${currentTaskId}/output/`, '_blank');
+  });
+}
+
 function buildNodeList(nodes: FileTreeNode[]): HTMLElement {
   const container = el('div', { className: 'tree-children' });
   const editingPath = getState('editingFilePath');

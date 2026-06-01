@@ -102,7 +102,8 @@ class LocalLLMProvider(LLMProvider):
                 if isinstance(content, str):
                     response_output += content
                     if progress_callback:
-                        progress_callback(strip_thinking_process(response_output))
+                        text = response_output if self.model_think else strip_thinking_process(response_output)
+                        progress_callback(text)
 
                 usage = event.get("usage")
                 if usage:
@@ -143,7 +144,7 @@ class LocalLLMProvider(LLMProvider):
                 })
 
             self._set_last_reasoning(extract_reasoning(response_output))
-            return strip_thinking_process(response_output)
+            return response_output if self.model_think else strip_thinking_process(response_output)
 
         except requests.exceptions.RequestException as e:
             error_text = ""

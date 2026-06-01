@@ -9,9 +9,10 @@ interface AppState {
   editingFilePath: string | null;
   finishOutcome: FinishOutcome;
   logAutoScroll: boolean;
-  expandedLogs: Set<string>;
   renderedLogs: Set<string>;
   expandedFolders: Set<string>;
+  batchSelectionMode: boolean;
+  selectedTasksForDelete: Set<string>;
 }
 
 const state: AppState = {
@@ -23,9 +24,10 @@ const state: AppState = {
   editingFilePath: null,
   finishOutcome: 'completed',
   logAutoScroll: true,
-  expandedLogs: new Set(),
   renderedLogs: new Set(),
   expandedFolders: new Set(),
+  batchSelectionMode: false,
+  selectedTasksForDelete: new Set(),
 };
 
 export function getState<K extends keyof AppState>(key: K): AppState[K] {
@@ -41,7 +43,6 @@ export function setState<K extends keyof AppState>(
 
 export function resetTaskState(): void {
   state.renderedLogs.clear();
-  state.expandedLogs.clear();
   state.expandedFolders.clear();
   state.editingFilePath = null;
   state.editorTab = 'code';
@@ -57,4 +58,27 @@ export function deselectTask(): void {
   state.activeTaskStatus = null;
   state.lastRenderedStatus = null;
   resetTaskState();
+}
+
+export function toggleBatchSelectionMode(): void {
+  state.batchSelectionMode = !state.batchSelectionMode;
+  if (!state.batchSelectionMode) {
+    state.selectedTasksForDelete.clear();
+  }
+}
+
+export function toggleTaskSelection(taskId: string): void {
+  if (state.selectedTasksForDelete.has(taskId)) {
+    state.selectedTasksForDelete.delete(taskId);
+  } else {
+    state.selectedTasksForDelete.add(taskId);
+  }
+}
+
+export function clearSelectedTasks(): void {
+  state.selectedTasksForDelete.clear();
+}
+
+export function getSelectedTasks(): Set<string> {
+  return state.selectedTasksForDelete;
 }

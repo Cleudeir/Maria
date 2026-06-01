@@ -6,7 +6,7 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
 
-from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format
+from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format, ContextExceededError, RetryableError
 
 
 _thread_local = threading.local()
@@ -188,7 +188,8 @@ class LlamaCppProvider(LLMProvider):
                 if isinstance(content, str):
                     response_output += content
                     if progress_callback:
-                        progress_callback(strip_thinking_process(response_output))
+                        text = response_output if self.model_think else strip_thinking_process(response_output)
+                        progress_callback(text)
 
                 if choice.get("finish_reason"):
                     finish_reason = choice.get("finish_reason")
@@ -240,11 +241,13 @@ class LlamaCppProvider(LLMProvider):
             reasoning = extract_reasoning(response_output)
             _save_generation_log(system_text, messages, response_output, usage_data, finish_reason, reasoning=reasoning)
 
-            return strip_thinking_process(response_output)
+            return response_output if self.model_think else strip_thinking_process(response_output)
 
         except requests.exceptions.RequestException as e:
             error_text = ""
+            status_code = None
             if hasattr(e, 'response') and e.response is not None:
+                status_code = e.response.status_code
                 try:
                     body = e.response.text[:500]
                     if body:
@@ -254,6 +257,10 @@ class LlamaCppProvider(LLMProvider):
             full_msg = f"llamacpp request failed{error_text}"
             print(f"[llamacpp] ERROR: {full_msg}", flush=True)
             _save_generation_log(system_text, messages, response_output, {}, finish_reason, error=full_msg)
+            if status_code == 400 and ("exceeds the available context size" in error_text or "Context size has been exceeded" in error_text):
+                raise ContextExceededError(full_msg)
+            if status_code in (429, 503) or isinstance(e, requests.exceptions.Timeout):
+                raise RetryableError(full_msg)
             raise RuntimeError(full_msg)
 
     def chat(

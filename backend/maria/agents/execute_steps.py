@@ -102,20 +102,34 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 print(
                     "⚠️ Formatting error: The model did not output a valid tool call tag structure."
                 )
-                err_msg = (
-                    f"ERROR: Format error - Your response could not be parsed into a valid tool call.\n\n"
-                    f"CORRECT FORMAT:\n"
-                    f"Output your reasoning followed by one or more JSON tool calls:\n"
-                    f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n'
-                    f'Or multiple sequentially:\n'
-                    f'{{"tool": "a", "args": {{}}}}{{"tool": "b", "args": {{}}}}\n'
-                    f'Or as a JSON array:\n'
-                    f'[{{"tool": "a", "args": {{}}}}, {{"tool": "b", "args": {{}}}}]\n\n'
-                    f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, run_command, finish_task\n\n"
-                    f"CURRENT STEP: {step_desc}\n\n"
-                    f"What you should do: Determine the next action for this step and output it in the correct JSON format. "
-                    f"Do not ask questions or request input. Execute autonomously."
-                )
+                format_error_retries += 1
+
+                if format_error_retries >= 8:
+                    err_msg = (
+                        f"CRITICAL: You have failed to output a valid tool call {format_error_retries} times.\n\n"
+                        f"You MUST write the code directly using write_file now. Do NOT try any other tools.\n"
+                        f'Use exactly this format: {{"tool": "write_file", "args": {{"path": "output/filename", "content": "your code here"}}}}\n\n'
+                        f"Do NOT output anything else. Do NOT add explanation. Do NOT try run_command, do NOT list_dir.\n"
+                        f"Just write the file. If the step is already done, call finish_task.\n\n"
+                        f"CURRENT STEP: {step_desc}"
+                    )
+                elif format_error_retries >= 5:
+                    err_msg = (
+                        f"ERROR: Format error (attempt {format_error_retries}). Your response could not be parsed into a valid tool call.\n\n"
+                        f"You are repeating the same mistake. STOP and simplify drastically.\n"
+                        f'Use ONLY this exact format: {{"tool": "write_file", "args": {{"path": "output/filename", "content": "code"}}}}\n\n'
+                        f"Do NOT use any other tool. Do NOT add explanation before/after.\n"
+                        f"CURRENT STEP: {step_desc}"
+                    )
+                else:
+                    err_msg = (
+                        f"ERROR: Format error - Your response could not be parsed into a valid tool call.\n\n"
+                        f"CORRECT FORMAT:\n"
+                        f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n\n'
+                        f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, run_command, start_http_server, stop_http_server, list_http_servers, finish_task\n\n"
+                        f"CURRENT STEP: {step_desc}\n\n"
+                        f"Output ONLY a valid JSON tool call. No explanations. No markdown."
+                    )
                 errors_encountered.append(
                     {"step": step_num, "type": "format_error", "message": err_msg}
                 )
@@ -128,13 +142,6 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         "content": f"ERROR: {err_msg}",
                     }
                 )
-                format_error_retries += 1
-                if format_error_retries >= 10:
-                    print(
-                        "⚠️ Reached maximum format-error retry attempts for this step."
-                    )
-                    overall_success = False
-                    break
                 continue
 
             # Execute all tool calls sequentially
@@ -187,6 +194,17 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     )
                 elif tool_name == "run_command":
                     tool_result = executor.run_command(args.get("command", ""))
+                elif tool_name == "start_http_server":
+                    tool_result = executor.start_http_server(
+                        args.get("port", 10010),
+                        args.get("path", "."),
+                    )
+                elif tool_name == "stop_http_server":
+                    tool_result = executor.stop_http_server(
+                        args.get("server_id", ""),
+                    )
+                elif tool_name == "list_http_servers":
+                    tool_result = executor.list_http_servers()
                 else:
                     tool_result = f"Error: Tool '{tool_name}' is not supported."
 

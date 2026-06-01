@@ -5,6 +5,7 @@ import type {
   FileViewResponse,
   LessonsResponse,
   PromptResponse,
+  HttpServersResponse,
 } from '../types';
 
 const API_BASE = '';
@@ -88,4 +89,15 @@ export const api = {
     }),
 
   getLessons: () => request<LessonsResponse>('/api/memory/lessons'),
+
+  getHtmlFiles: (taskId: string) =>
+    request<{ html_files: string[] }>(`/api/tasks/${taskId}/html-files`),
+
+  listServers: () => request<HttpServersResponse>('/api/servers'),
+
+  stopServer: (serverId: string, taskId?: string) =>
+    request<Record<string, unknown>>('/api/servers', {
+      method: 'POST',
+      body: JSON.stringify({ server_id: serverId, task_id: taskId }),
+    }),
 };

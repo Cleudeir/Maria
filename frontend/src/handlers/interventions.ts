@@ -102,7 +102,8 @@ export function initIntervention(): void {
 
   const chatInput = $('#chat-bar-prompt') as HTMLTextAreaElement | null;
   chatInput?.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    if (e.key === 'Enter') {
+      if (e.shiftKey) return;
       e.preventDefault();
       sendChatPrompt();
     }

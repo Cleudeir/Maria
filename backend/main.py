@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import time
 from maria.agents import MariaAgent, SelfImprovementAgent
 
 def main():
@@ -9,6 +10,8 @@ def main():
     parser.add_argument("--workspace", type=str, default="workspace", help="Path to workspace directory.")
     parser.add_argument("--memory", type=str, default="memory", help="Path to memory directory.")
     parser.add_argument("--max-steps", type=int, default=20, help="Maximum execution steps.")
+    parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts on failure.")
+    parser.add_argument("--retry-delay", type=int, default=30, help="Delay in seconds between retries.")
     parser.add_argument("--base-url", type=str, default="http://localhost:11434", help="LLM API base URL.")
     parser.add_argument("--isolate", action="store_true", default=True, help="Isolate task in its own workspace subfolder.")
     parser.add_argument("--no-isolate", dest="isolate", action="store_false", help="Do not isolate task in its own subfolder.")
@@ -24,7 +27,6 @@ def main():
     
     # Isolate task in separate folder if requested
     if args.isolate:
-        import time
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         task_folder_name = f"task_{timestamp}"
         workspace_dir = os.path.join(workspace_dir, task_folder_name)
@@ -100,14 +102,35 @@ def main():
     agent = MariaAgent(workspace_dir, memory_dir, base_url=args.base_url)
     meta_agent = SelfImprovementAgent(memory_dir, base_url=args.base_url)
     
-    # Run agent task
+    # Run agent task with retry logic
     try:
-        success = agent.run(args.task, max_steps=args.max_steps)
+        success = False
+        attempt = 0
+        
+        while attempt <= args.max_retries:
+            if attempt > 0:
+                print(f"\n🔄 Retry attempt {attempt}/{args.max_retries} (waiting {args.retry_delay}s)...")
+                time.sleep(args.retry_delay)
+            
+            print(f"\n{'=' * 60}")
+            print(f"🚀 Attempt {attempt + 1}/{args.max_retries + 1}")
+            print(f"{'=' * 60}\n")
+            
+            # Reset agent state for retry
+            agent = MariaAgent(workspace_dir, memory_dir, base_url=args.base_url)
+            
+            success = agent.run(args.task, max_steps=args.max_steps)
+            
+            if success:
+                break
+            
+            attempt += 1
+        
         print("\n" + "=" * 60)
         if success:
             print("🎉 TASK COMPLETED SUCCESSFULLY!")
         else:
-            print("❌ TASK FAILED OR REACHED MAX STEPS.")
+            print("❌ TASK FAILED AFTER ALL RETRIES.")
         print("=" * 60)
         
         # Self improvement loop

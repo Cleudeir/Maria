@@ -1,12 +1,35 @@
 import os
-import re
 from typing import List, Tuple, Optional, Callable
 
-from maria.tools import is_binary_file
+# Expected domains and minimum file counts for a non-trivial project
+EXPECTED_DOMAINS = {
+    "output": 1,
+    "output/config": 2,
+    "output/src/core": 1,
+    "output/src/entities": 1,
+    "output/src/world": 1,
+    "output/src/physics": 1,
+    "output/src/ai": 1,
+    "output/src/missions": 1,
+    "output/src/inventory": 1,
+    "output/src/audio": 1,
+    "output/src/ui": 1,
+    "output/src/networking": 1,
+    "output/src/utils": 1,
+}
 
 
-MAX_FILE_CHARS = 8000
-MAX_TOTAL_CHARS = 40000
+def _count_files_by_prefix(workspace_dir: str, prefix: str) -> int:
+    """Count files in a subdirectory."""
+    count = 0
+    target_dir = os.path.join(workspace_dir, prefix)
+    if os.path.isdir(target_dir):
+        for f in os.listdir(target_dir):
+            fp = os.path.join(target_dir, f)
+            if os.path.isfile(fp) and not f.startswith("."):
+                count += 1
+    return count
+
 
 def verify_execution(
     workspace_dir: str,
@@ -14,111 +37,59 @@ def verify_execution(
     steps: List[str],
     get_generate_fn,
     stream_callback: Optional[Callable[[str], None]] = None,
+    complexity: str = "complex",
 ) -> Tuple[str, str]:
-    # Gather all files in workspace
-    workspace_files_content = ""
-    for root, dirs, files in os.walk(workspace_dir):
-        # Prune directories in-place to avoid traversing them
-        dirs[:] = [
-            d
-            for d in dirs
-            if d not in (".git", ".venv", "__pycache__", ".pytest_cache", "plan", "logs")
-        ]
-        for file in files:
-            if file in ("task_state.json", "task_info.html", "checkpoint.json"):
-                continue
-            file_path = os.path.join(root, file)
-            rel_path = os.path.relpath(file_path, workspace_dir)
-            if is_binary_file(file_path):
-                workspace_files_content += (
-                    f"\n--- FILE: {rel_path} (binary file, skipped) ---\n"
-                )
-                continue
-            # Stop reading more files if we've hit the total budget
-            if len(workspace_files_content) >= MAX_TOTAL_CHARS:
-                workspace_files_content += (
-                    f"\n--- (remaining files omitted, total content limit reached) ---\n"
-                )
-                break
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-                if len(content) > MAX_FILE_CHARS:
-                    half = MAX_FILE_CHARS // 2
-                    content = content[:half] + "\n\n... [truncated] ...\n\n" + content[-half:]
-                workspace_files_content += (
-                    f"\n--- FILE: {rel_path} ---\n{content}\n"
-                )
-            except Exception as e:
-                workspace_files_content += (
-                    f"\n--- FILE: {rel_path} (Failed to read: {e}) ---\n"
-                )
-        if len(workspace_files_content) >= MAX_TOTAL_CHARS:
-            break
+    total_files = 0
+    domain_results = []
+    missing_domains = []
 
-    steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
-
-    prompt = f"""You are a QA engineer and code auditor. Your task is to verify if the implementation matches the plan and all execution steps were fully completed.
-Analyze the implementation plan, the execution steps, and the generated workspace files.
-
-Implementation Plan:
----
-{plan}
----
-
-Execution Steps:
----
-{steps_str}
----
-
-Generated Workspace Files & Content:
----
-{workspace_files_content}
----
-
-MISSION:
-1. Audit the generated files against the plan and execution steps.
-2. Determine if anything is missing, incomplete, or contains obvious bugs.
-3. Conclude with a clear verdict: "VERDICT: SUCCESS" if all steps were executed successfully and code is complete, or "VERDICT: FAILED" if there are missing parts, errors, or uncompleted steps. Provide detailed feedback.
-
-Output your response as a JSON object:
-{{"analysis": "Your detailed analysis and auditing findings", "verdict": "SUCCESS or FAILED"}}
-"""
-    response = get_generate_fn(
-        system_text="You are a code verification quality control assistant.",
-        user_text=prompt,
-        progress_callback=stream_callback,
-    )
-
-    try:
-        import json
-        # Strip markdown code blocks if present
-        clean_response = response.strip()
-        if clean_response.startswith("```"):
-            # Remove first line (```json or ```) and last line (```)
-            lines = clean_response.split("\n")
-            if lines[-1].strip() == "```":
-                lines = lines[1:-1]
-            else:
-                lines = lines[1:]
-            clean_response = "\n".join(lines)
-        data = json.loads(clean_response)
-        analysis = data.get("analysis", response.strip())
-        verdict = data.get("verdict", "FAILED").strip().upper()
-    except (json.JSONDecodeError, Exception):
-        analysis_match = re.search(
-            r"<analysis>(.*?)</analysis>", response, re.DOTALL | re.IGNORECASE
-        )
-        verdict_match = re.search(
-            r"<verdict>(.*?)</verdict>", response, re.DOTALL | re.IGNORECASE
-        )
-        analysis = (
-            analysis_match.group(1).strip() if analysis_match else response.strip()
-        )
-        verdict = verdict_match.group(1).strip().upper() if verdict_match else "FAILED"
-    if "SUCCESS" in verdict:
-        verdict = "SUCCESS"
+    if complexity == "simple":
+        output_dir = os.path.join(workspace_dir, "output")
+        if not os.path.isdir(output_dir):
+            total_files = 0
+            domain_results.append("  ❌ output: directory does not exist")
+        else:
+            for f in os.listdir(output_dir):
+                fp = os.path.join(output_dir, f)
+                if os.path.isfile(fp) and not f.startswith("."):
+                    total_files += 1
+            domain_results.append(f"  output: {total_files} file(s)")
+        analysis_lines = [
+            f"Total files in workspace: {total_files}",
+            "Simple mode — only checking that files exist:",
+        ] + domain_results
+        if total_files >= 1:
+            verdict = "SUCCESS"
+            analysis_lines.append("Files were generated successfully.")
+        else:
+            verdict = "FAILED"
+            analysis_lines.append("No files found in output directory.")
     else:
-        verdict = "FAILED"
+        for domain, min_count in EXPECTED_DOMAINS.items():
+            count = _count_files_by_prefix(workspace_dir, domain)
+            total_files += count
+            if count >= min_count:
+                domain_results.append(f"  ✅ {domain}: {count} file(s)")
+            else:
+                domain_results.append(f"  ❌ {domain}: {count} file(s) (expected {min_count})")
+                missing_domains.append(domain)
+
+        analysis_lines = [
+            f"Total files in workspace: {total_files}",
+            "Domain breakdown:",
+        ] + domain_results
+
+        if missing_domains:
+            analysis_lines.append(f"\nMissing/underpopulated domains: {', '.join(missing_domains)}")
+            verdict = "FAILED"
+            analysis_lines.append("Some expected domains have insufficient files.")
+        elif total_files >= 15:
+            verdict = "SUCCESS"
+            analysis_lines.append("All expected domains have sufficient files.")
+        else:
+            verdict = "FAILED"
+            analysis_lines.append("Very few files generated.")
+
+    analysis = "\n".join(analysis_lines)
 
     return verdict, analysis

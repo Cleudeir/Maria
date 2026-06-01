@@ -1,10 +1,14 @@
-import { loadTasksList, refreshDashboard, pollActiveTask, initTaskButtons } from './handlers/tasks';
+import { loadTasksList, refreshDashboard, pollActiveTask, initTaskButtons, renderActiveServers } from './handlers/tasks';
 import { initTabs } from './ui/tabs';
 import { initLogScroll } from './ui/logs';
 import { initEditor } from './ui/editor';
 import { initIntervention } from './handlers/interventions';
 import { initModals } from './handlers/modals';
+import { renderPipeline, resetPipelineRender, updatePipelineTaskStatus } from './ui/pipeline';
+import { initRouter, navigateToPipeline } from './ui/router';
+import { initOpenFolderButton } from './ui/filetree';
 import { getState } from './state/store';
+import { api } from './api/client';
 import { $ } from './utils/dom';
 
 function initTheme(): void {
@@ -18,6 +22,8 @@ function initTheme(): void {
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('maria-theme', next);
     updateThemeButton(next);
+    resetPipelineRender();
+    renderPipeline('pipeline-view-container');
   });
 }
 
@@ -42,13 +48,34 @@ function init(): void {
   initIntervention();
   initModals();
   initTaskButtons();
+  initRouter();
+  initOpenFolderButton();
 
-  setInterval(() => {
-    loadTasksList();
+  $('#btn-pipeline-page')?.addEventListener('click', navigateToPipeline);
+
+  setInterval(async () => {
+    await loadTasksList();
     if (getState('currentTaskId')) {
-      pollActiveTask();
+      await pollActiveTask();
+      const currentId = getState('currentTaskId');
+      if (currentId) {
+        try { await renderActiveServers(currentId); } catch {}
+      }
     } else {
-      refreshDashboard();
+      await refreshDashboard();
+      const pipelineView = $('#pipeline-view');
+      if (pipelineView && pipelineView.style.display !== 'none') {
+        try {
+          const tasks = await api.listTasks();
+          const relevant = tasks.find(t =>
+            t.status === 'running' || t.status === 'processando' || t.status === 'awaiting_intervention'
+          ) || tasks.find(t => t.status === 'failed') || tasks[tasks.length - 1];
+          if (relevant) {
+            const details = await api.getTask(relevant.task_id);
+            updatePipelineTaskStatus(details as any);
+          }
+        } catch {}
+      }
     }
   }, 1200);
 }

@@ -2,6 +2,7 @@ import os
 from typing import List, Dict, Any, Optional, Callable
 
 from maria.provider import create_provider, LLMProvider
+from maria.compact_context import compact_messages, total_tokens
 
 
 class LLMClient:
@@ -35,6 +36,15 @@ class LLMClient:
         stream: bool = True,
         stream_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
+        max_ctx = getattr(self.provider, 'max_context_window', 32768)
+        if total_tokens(messages) > int(max_ctx * 0.5):
+            compacted = compact_messages(
+                messages,
+                token_budget=int(max_ctx * 0.45),
+                max_context_tokens=max_ctx,
+            )
+            if compacted is not messages:
+                messages = compacted
         return self.provider.chat(
             messages,
             temperature=temperature,

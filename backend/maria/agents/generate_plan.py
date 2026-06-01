@@ -7,7 +7,8 @@ SIMPLE_PROMPT = (
     "- Do not create extra folders, configs, or utilities unless explicitly asked\n"
     "- Keep everything in a single file if possible\n"
     "- No TDD, no tests, no architecture patterns unless asked\n"
-    "- Just implement what the user requested"
+    "- Just implement what the user requested\n"
+    "- CRITICAL: The plan must describe the APPROACH only. NEVER include code, pseudocode, or implementation text in the plan."
 )
 
 COMPLEX_PROMPT = (
@@ -18,7 +19,8 @@ COMPLEX_PROMPT = (
     "- Each function must have a single, clear responsibility\n"
     "- Group utility functions separately from business logic\n"
     "- Keep configuration separate from code\n"
-    "- Use clear, descriptive file and function names"
+    "- Use clear, descriptive file and function names\n"
+    "- CRITICAL: The plan must describe the APPROACH only. NEVER include code, pseudocode, or implementation text in the plan."
 )
 
 SIMPLE_SYSTEM = "You are a direct, no-nonsense coding assistant. Do exactly what is asked without over-engineering."

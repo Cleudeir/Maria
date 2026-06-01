@@ -49,16 +49,21 @@ function renderAssistantContent(content: string): string {
     }
 
     if (braceCount === 0) {
+      let jsonStr = content.substring(startIdx, endIdx);
       try {
-        let jsonStr = content.substring(startIdx, endIdx);
-        jsonStr = jsonStr
-          .replace(/(?<="[^"]*)\n(?=[^"]*")/g, '\\n')
-          .replace(/(?<="[^"]*)\r(?=[^"]*")/g, '\\r')
-          .replace(/(?<="[^"]*)\t(?=[^"]*")/g, '\\t');
         const data = JSON.parse(jsonStr);
         return renderToolCall(data.tool, data.args ?? {});
       } catch {
-        // fall through
+        try {
+          jsonStr = jsonStr
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(/\t/g, '\\t');
+          const data = JSON.parse(jsonStr);
+          return renderToolCall(data.tool, data.args ?? {});
+        } catch {
+          // fall through
+        }
       }
     }
   }
@@ -78,26 +83,8 @@ function renderEntryBody(entry: LogEntry): string {
   return `<div class="log-markdown">${renderMarkdown(entry.content)}</div>`;
 }
 
-function renderCollapsibleCard(bodyHtml: string, rawContent: string, entryKey: string): string {
-  if (rawContent.length <= 300) return bodyHtml;
-
-  const isExpanded = getState('expandedLogs').has(entryKey);
-  const previewText = rawContent.slice(0, 300);
-  const preview = `${renderMarkdown(previewText)}<span class="log-collipsis">...</span>`;
-
-  return `
-    <div class="log-collapsible-card">
-      <div class="log-collapsible-preview" style="display: ${isExpanded ? 'none' : 'block'};">
-        ${preview}
-      </div>
-      <button type="button" class="log-expand-btn" data-expanded="${isExpanded}" data-entry-key="${encodeURIComponent(entryKey)}">
-        ${isExpanded ? 'Recolher' : 'Expandir'}
-      </button>
-      <div class="log-collapsible-full" style="display: ${isExpanded ? 'block' : 'none'};">
-        ${bodyHtml}
-      </div>
-    </div>
-  `;
+function renderCollapsibleCard(bodyHtml: string): string {
+  return bodyHtml;
 }
 
 function getRoleIcon(role: string): string {
@@ -126,8 +113,7 @@ function renderCard(entry: LogEntry): HTMLElement {
     : '';
 
   const bodyHtml = renderEntryBody(entry);
-  const entryKey = getLogKey(entry);
-  const collapsibleHtml = renderCollapsibleCard(bodyHtml, entry.content, entryKey);
+  const collapsibleHtml = renderCollapsibleCard(bodyHtml);
 
   card.innerHTML = `
     <div class="log-card-header">
@@ -140,24 +126,54 @@ function renderCard(entry: LogEntry): HTMLElement {
   return card;
 }
 
-export function renderLogs(logs: LogEntry[]): void {
+function renderCommandOutputCard(output: string): HTMLElement {
+  const card = el('div', { className: 'log-card log-role-tool_result log-command-streaming' });
+
+  card.innerHTML = `
+    <div class="log-card-header">
+      <span><i class="fa-solid fa-terminal"></i> COMMAND OUTPUT (LIVE)</span>
+    </div>
+    <div class="log-card-body">
+      <div class="log-plain log-tool-result-text">
+        <div class="log-collapsible-text">${escapeHtml(output)}</div>
+      </div>
+    </div>
+  `;
+
+  return card;
+}
+
+export function renderLogs(logs: LogEntry[], commandOutput?: string): void {
   const container = $('#execution-log') as HTMLElement | null;
   if (!container) return;
 
   const currentId = getState('currentTaskId');
-  if (container.dataset.taskId !== currentId) {
+  const taskChanged = container.dataset.taskId !== currentId;
+  if (taskChanged) {
     container.dataset.taskId = currentId ?? '';
+    container.innerHTML = '';
+    setState('renderedLogs', new Set());
   }
 
   const preserveScroll = container.scrollTop;
-  container.innerHTML = '';
-  setState('renderedLogs', new Set());
   const rendered = getState('renderedLogs');
 
   for (const entry of logs) {
     const key = getLogKey(entry);
+    if (rendered.has(key)) continue;
     rendered.add(key);
     container.appendChild(renderCard(entry));
+  }
+
+  const existingCmd = container.querySelector('.log-command-streaming');
+  if (commandOutput) {
+    if (existingCmd) {
+      existingCmd.querySelector('.log-collapsible-text')!.textContent = commandOutput;
+    } else {
+      container.appendChild(renderCommandOutputCard(commandOutput));
+    }
+  } else if (existingCmd) {
+    existingCmd.remove();
   }
 
   if (getState('logAutoScroll')) {
@@ -178,31 +194,5 @@ export function initLogScroll(): void {
     setState('logAutoScroll', atBottom);
   });
 
-  container.addEventListener('click', (e) => {
-    const target = e.target as HTMLElement;
-    const btn = target.closest('.log-expand-btn') as HTMLElement | null;
-    if (!btn) return;
 
-    const entryKey = decodeURIComponent(btn.dataset.entryKey ?? '');
-    const expanded = btn.dataset.expanded === 'true';
-    const card = btn.closest('.log-collapsible-card');
-    if (!card) return;
-
-    const preview = card.querySelector<HTMLElement>('.log-collapsible-preview');
-    const full = card.querySelector<HTMLElement>('.log-collapsible-full');
-
-    if (expanded) {
-      if (preview) preview.style.display = 'block';
-      if (full) full.style.display = 'none';
-      btn.textContent = 'Expandir';
-      btn.dataset.expanded = 'false';
-      getState('expandedLogs').delete(entryKey);
-    } else {
-      if (preview) preview.style.display = 'none';
-      if (full) full.style.display = 'block';
-      btn.textContent = 'Recolher';
-      btn.dataset.expanded = 'true';
-      getState('expandedLogs').add(entryKey);
-    }
-  });
 }
