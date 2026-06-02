@@ -21,7 +21,7 @@ def load_tasks(tasks_file):
     with open(tasks_file, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def run_task(task, workspace_base, memory_dir, base_url, max_steps):
+def run_task(task, workspace_base, memory_dir, base_url):
     task_id = task["id"]
     task_name = task["name"]
     difficulty = task["difficulty"]
@@ -42,7 +42,7 @@ def run_task(task, workspace_base, memory_dir, base_url, max_steps):
     error_msg = None
     
     try:
-        agent_success = agent.run(prompt, max_steps=max_steps)
+        agent_success = agent.run(prompt)
     except Exception as e:
         error_msg = f"Agent crashed with exception: {e}\n{traceback.format_exc()}"
         print(f"❌ {error_msg}")
@@ -239,11 +239,20 @@ def main():
                 except Exception as e:
                     verification_error = f"Error: {e}"
             
+            state_path = os.path.join(task_workspace, "task_state.json")
+            agent_completed = False
+            if os.path.exists(state_path):
+                try:
+                    with open(state_path, "r", encoding="utf-8") as f:
+                        st = json.load(f)
+                        agent_completed = st.get("status") == "completed"
+                except Exception:
+                    pass
             results.append({
                 "id": task["id"],
                 "name": task["name"],
                 "difficulty": task["difficulty"],
-                "agent_success": os.path.exists(os.path.join(task_workspace, "verification_report.md")),
+                "agent_success": agent_completed,
                 "verification_success": verification_success,
                 "elapsed_seconds": 0,
                 "steps_count": 0,
@@ -253,7 +262,7 @@ def main():
             })
         else:
             # Run task end-to-end
-            res = run_task(task, args.workspace, args.memory, args.base_url, args.max_steps)
+            res = run_task(task, args.workspace, args.memory, args.base_url)
             results.append(res)
             
     print_summary_table(results)

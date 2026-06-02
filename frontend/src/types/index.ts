@@ -1,7 +1,6 @@
-export type TabName = 'logs' | 'streaming' | 'agent' | 'workspace';
+export type TabName = 'logs' | 'streaming' | 'created' | 'agent' | 'workspace';
 export type EditorTab = 'code' | 'preview';
 export type FinishOutcome = 'completed' | 'failed';
-export type InterventionAction = 'approve' | 'modify' | 'continue';
 
 export interface LlmUsage {
   prompt_tokens?: number;
@@ -19,16 +18,21 @@ export interface LogEntry {
   llm_usage?: LlmUsage;
 }
 
-export interface ProposedTool {
-  name: string;
-  args: Record<string, unknown>;
-}
-
 export interface FileTreeNode {
   name: string;
   path: string;
   type: 'file' | 'directory';
   children?: FileTreeNode[];
+}
+
+export interface CreatedFile {
+  path: string;
+  created_at: string;
+  step?: number;
+}
+
+export interface ToCreateFile {
+  path: string;
 }
 
 export interface Task {
@@ -42,7 +46,6 @@ export interface Task {
   mode?: string;
   execution_log?: LogEntry[];
   file_tree?: FileTreeNode[];
-  proposed_tool?: ProposedTool | null;
   is_streaming?: boolean;
   current_streaming_response?: string;
   current_command_output?: string;
@@ -52,6 +55,9 @@ export interface Task {
   supervision_reason?: string;
   supervision_last_review?: string;
   errors_encountered?: string[];
+  created_files?: CreatedFile[];
+  project_files_to_create?: ToCreateFile[];
+  files_progress?: number;
 }
 
 export interface DashboardStats {
@@ -116,5 +122,4 @@ export type TaskStatus =
   | 'processando'
   | 'completed'
   | 'failed'
-  | 'awaiting_intervention'
   | 'legacy';

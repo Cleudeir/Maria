@@ -2,6 +2,8 @@ import json
 import re
 from typing import List, Dict, Tuple, Any
 
+from maria.runaway import is_runaway_response
+
 
 def _extract_json_object(text: str, start_idx: int) -> str:
     """Extract a JSON object starting at start_idx by tracking balanced braces, accounting for strings."""
@@ -113,6 +115,9 @@ def parse_agent_responses(response_text: str) -> List[Tuple[str, Dict[str, Any]]
     Returns a list of (tool_name, args) tuples.
     """
     if not isinstance(response_text, str):
+        return []
+
+    if is_runaway_response(response_text):
         return []
 
     results = []

@@ -31,8 +31,6 @@ def save_checkpoint(workspace_dir, task_id, state):
         "last_raw_response": state.get("last_raw_response"),
         "errors_encountered": state.get("errors_encountered", []),
         "mode": state.get("mode"),
-        "verification_report": state.get("verification_report"),
-        "verification_verdict": state.get("verification_verdict"),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -60,7 +58,7 @@ def restore_checkpoint_into_state(checkpoint, state):
         "stage", "current_step_idx", "messages", "proposed_tool",
         "completed_step_summaries", "steps", "plan", "improved_prompt",
         "last_tool_result", "last_user_intervention", "last_raw_response",
-        "errors_encountered", "verification_report", "verification_verdict",
+        "errors_encountered",
     ):
         if key in checkpoint and checkpoint[key] is not None:
             state[key] = checkpoint[key]
@@ -75,7 +73,7 @@ def can_resume_from_checkpoint(workspace_dir, task_id):
         return False
     stage = cp.get("stage")
     status = cp.get("status")
-    return stage is not None and status in ("running", "processando", "awaiting_intervention")
+    return stage is not None and status in ("running", "processando")
 
 
 def clear_checkpoint(workspace_dir, task_id):

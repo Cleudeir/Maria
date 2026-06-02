@@ -119,7 +119,7 @@ def main():
             # Reset agent state for retry
             agent = MariaAgent(workspace_dir, memory_dir, base_url=args.base_url)
             
-            success = agent.run(args.task, max_steps=args.max_steps)
+            success = agent.run(args.task)
             
             if success:
                 break

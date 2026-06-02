@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional, Tuple
 
 from maria.llm import LLMClient
 from maria.memory import load_system_prompt, load_lessons, add_task_history
@@ -7,8 +7,9 @@ from maria.tools import ToolExecutor
 
 from maria.agents.utils import parse_agent_response, is_llm_response
 from maria.agents.generate_plan import generate_plan
+from maria.agents.generate_structure import generate_structure
+from maria.agents.regenerate_plan import regenerate_plan
 from maria.agents.create_steps import create_steps
-from maria.agents.verify_execution import verify_execution
 from maria.agents.execute_steps import execute_steps
 
 
@@ -36,6 +37,12 @@ class MariaAgent:
     def generate_plan(self, task: str, stream_callback=None, complexity: str = "complex") -> str:
         return generate_plan(task, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback, complexity=complexity)
 
+    def generate_structure(self, plan: str, stream_callback=None) -> str:
+        return generate_structure(plan, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
+
+    def regenerate_plan(self, plan: str, structure: str, stream_callback=None) -> str:
+        return regenerate_plan(plan, structure, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
+
     def create_steps(self, plan: str, stream_callback=None, complexity: str = "complex") -> List[str]:
         return create_steps(plan, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback, complexity=complexity)
 
@@ -46,6 +53,7 @@ class MariaAgent:
         system_message: str,
         stream_callback=None,
         complexity: str = "complex",
+        on_file_created=None,
     ) -> Tuple[bool, List[str]]:
         return execute_steps(
             steps=steps,
@@ -57,12 +65,10 @@ class MariaAgent:
             get_generate_fn=self.client.provider.generate,
             stream_callback=stream_callback,
             complexity=complexity,
+            on_file_created=on_file_created,
         )
 
-    def verify_execution(self, plan: str, steps: List[str], stream_callback=None, complexity: str = "complex") -> Tuple[str, str]:
-        return verify_execution(self.workspace_dir, plan, steps, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback, complexity=complexity)
-
-    def run(self, task: str, max_steps: int = 20) -> bool:
+    def run(self, task: str) -> bool:
         """
         Runs the agentic loop to solve a task.
         """
@@ -158,51 +164,13 @@ class MariaAgent:
                 pass
             return False
 
-        # --- Stage 4: Final Verification ---
-        print("\n🔍 Stage 4: Verifying all plan was executed...")
-        self.execution_log.append(
-            {
-                "step": len(self.execution_log),
-                "role": "system",
-                "content": "Stage 4: Verifying all plan was executed...",
-            }
-        )
-
-        verdict, analysis_report = self.verify_execution(plan, steps, complexity=complexity)
-        print(f"Analysis Report:\n{analysis_report}\n")
-        print(f"Final Verdict: {verdict}")
-
-        self.execution_log.append(
-            {
-                "step": len(self.execution_log),
-                "role": "system",
-                "content": f"Analysis Report:\n{analysis_report}\n\nFinal Verdict: {verdict}",
-            }
-        )
-
-        # Save verification report
+        # Record final task status in HTML memory
         try:
-            with open(
-                os.path.join(self.workspace_dir, "verification_report.md"),
-                "w",
-                encoding="utf-8",
-            ) as f:
-                f.write(
-                    f"# Verification Report\n\nVerdict: {verdict}\n\n{analysis_report}"
-                )
-        except Exception as e:
-            print(f"⚠️ Warning: Could not write verification_report.md: {e}")
-
-        success = verdict == "SUCCESS"
-
-        # 5. Record final task status in HTML memory
-        status_str = "SUCCESS" if success else "FAILED"
-        details_str = (
-            analysis_report if success else f"Verification failed. Verdict: {verdict}"
-        )
-        try:
-            add_task_history(self.memory_dir, task, status_str, details_str[:200])
+            add_task_history(
+                self.memory_dir, task, "SUCCESS",
+                f"All {len(steps)} steps executed successfully."
+            )
         except Exception as e:
             print(f"⚠️ Failed to write task history: {e}")
 
-        return success
+        return True

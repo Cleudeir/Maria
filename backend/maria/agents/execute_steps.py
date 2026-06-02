@@ -1,6 +1,8 @@
+import json
 from typing import List, Dict, Any, Tuple, Optional, Callable
 from maria.provider.base import format_messages_to_prompt
 from maria.agents.utils import parse_agent_responses
+from maria.runaway import is_runaway_response, truncate_runaway, has_text_loop
 
 
 def execute_steps(
@@ -13,6 +15,7 @@ def execute_steps(
     get_generate_fn,
     stream_callback: Optional[Callable[[str], None]] = None,
     complexity: str = "complex",
+    on_file_created: Optional[Callable[[str, int], None]] = None,
 ) -> Tuple[bool, List[str]]:
     """
     Executes the generated steps sequentially using the LLM agentic loop.
@@ -20,6 +23,12 @@ def execute_steps(
     total_steps = len(steps)
     completed_step_summaries = []
     overall_success = True
+
+    # Scan existing files so the agent knows what already exists
+    existing_files = executor.list_dir(".")
+    existing_files_context = ""
+    if existing_files and existing_files != "(Empty directory)":
+        existing_files_context = "\nExisting project files before this step:\n" + existing_files + "\n"
 
     for step_idx, step_desc in enumerate(steps):
         step_num = step_idx + 1
@@ -52,12 +61,11 @@ Complete Plan:
 {completed_context}
 Current Step: Step {step_num} of {total_steps}
 Step Description: {step_desc}
-
+{existing_files_context if step_idx == 0 else ""}
 {"Do exactly what is asked. Do NOT over-engineer. Do NOT create extra files or architecture." if complexity == "simple" else "ORGANIZATION RULE:\n- Split code into separate files by domain/responsibility\n- Each file should contain related functions with a single purpose\n- Each function must have one clear responsibility"}
 
 Your objective is to complete ONLY this step using your tools.
 You may call multiple tools in a single response by providing them sequentially:
-{{"tool": "run_command", "args": {{"command": "mkdir -p output"}}}}
 {{"tool": "write_file", "args": {{"path": "output/file.txt", "content": "..."}}}}
 Or as a JSON array:
 [{{"tool": "tool1", "args": {{...}}}}, {{"tool": "tool2", "args": {{...}}}}]
@@ -69,6 +77,8 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
         step_turns = 0
         format_error_retries = 0
         step_success = False
+        recent_tool_calls = []  # track tool calls for loop detection
+        step_vars = {}  # per-step mutable state (e.g., analysis nudge count)
         while step_turns < 15:  # Max 15 turns per step
             step_turns += 1
             print(f"\n--- Step {step_num} - Turn {step_turns} ---")
@@ -88,6 +98,34 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                 )
                 overall_success = False
                 break
+
+            # Cap and sanitize runaway responses before storing
+            if is_runaway_response(response_text):
+                response_text = truncate_runaway(response_text)
+                execution_log.append({
+                    "step": len(execution_log),
+                    "role": "system",
+                    "content": "⚠️ Runaway generation detected and truncated.",
+                })
+
+            # Text loop detection: 20-char segment repeated 3+ times
+            if has_text_loop(response_text):
+                loop_msg = (
+                    f"CRITICAL LOOP DETECTED: Your response contains a repeating text pattern "
+                    f"(the same 20-character segment repeated 3+ times). This is an LLM loop.\n\n"
+                    f"You MUST stop repeating yourself and immediately call finish_task:\n"
+                    f'{{"tool": "finish_task", "args": {{"summary": "Completed step: {step_desc}"}}}}\n\n'
+                    f"Call finish_task NOW."
+                )
+                step_messages.append({"role": "assistant", "content": response_text})
+                step_messages.append({"role": "user", "content": loop_msg})
+                execution_log.append({
+                    "step": len(execution_log),
+                    "role": "tool_result",
+                    "content": "LOOP DETECTED: Text-level loop (repeating 20-char segment 3+ times).",
+                })
+                recent_tool_calls.clear()
+                continue
 
             execution_log.append(
                 {
@@ -109,7 +147,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         f"CRITICAL: You have failed to output a valid tool call {format_error_retries} times.\n\n"
                         f"You MUST write the code directly using write_file now. Do NOT try any other tools.\n"
                         f'Use exactly this format: {{"tool": "write_file", "args": {{"path": "output/filename", "content": "your code here"}}}}\n\n'
-                        f"Do NOT output anything else. Do NOT add explanation. Do NOT try run_command, do NOT list_dir.\n"
+                        f"Do NOT output anything else. Do NOT add explanation. Just write the file.\n"
                         f"Just write the file. If the step is already done, call finish_task.\n\n"
                         f"CURRENT STEP: {step_desc}"
                     )
@@ -126,7 +164,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         f"ERROR: Format error - Your response could not be parsed into a valid tool call.\n\n"
                         f"CORRECT FORMAT:\n"
                         f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n\n'
-                        f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, run_command, start_http_server, stop_http_server, list_http_servers, finish_task\n\n"
+                        f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, start_http_server, stop_http_server, list_http_servers, run_lint, finish_task\n\n"
                         f"CURRENT STEP: {step_desc}\n\n"
                         f"Output ONLY a valid JSON tool call. No explanations. No markdown."
                     )
@@ -192,8 +230,6 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                         args.get("path", ""),
                         args.get("pattern", ""),
                     )
-                elif tool_name == "run_command":
-                    tool_result = executor.run_command(args.get("command", ""))
                 elif tool_name == "start_http_server":
                     tool_result = executor.start_http_server(
                         args.get("port", 10010),
@@ -205,6 +241,11 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     )
                 elif tool_name == "list_http_servers":
                     tool_result = executor.list_http_servers()
+                elif tool_name == "run_lint":
+                    tool_result = executor.run_lint(
+                        args.get("language", "python"),
+                        args.get("path", "."),
+                    )
                 else:
                     tool_result = f"Error: Tool '{tool_name}' is not supported."
 
@@ -249,8 +290,124 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
                     print(
                         f"🔍 Tool Result:\n{tool_result[:300] + '...' if len(tool_result) > 300 else tool_result}"
                     )
+                    # Track created/edited files
+                    if tool_name in ("write_file", "edit_file", "edit_lines") and on_file_created:
+                        file_path = args.get("path", "")
+                        if file_path:
+                            on_file_created(file_path, step_num)
 
                 all_results.append(f"[{tool_name}] {tool_result}")
+
+                # Track tool calls for loop detection
+                call_signature = f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+                recent_tool_calls.append(call_signature)
+                if len(recent_tool_calls) > 8:
+                    recent_tool_calls.pop(0)
+
+            # Loop detection: check for repeated patterns
+            if recent_tool_calls:
+                # Check for 3+ identical consecutive calls
+                if len(recent_tool_calls) >= 3:
+                    last_three = recent_tool_calls[-3:]
+                    if last_three[0] == last_three[1] == last_three[2]:
+                        loop_msg = (
+                            f"CRITICAL LOOP DETECTED: You have called the same tool with identical arguments "
+                            f"3 times in a row without making progress. This is a loop.\n\n"
+                            f"You MUST stop making tool calls and immediately call finish_task:\n"
+                            f'{{"tool": "finish_task", "args": {{"summary": "Completed step: {step_desc}"}}}}\n\n'
+                            f"Call finish_task NOW."
+                        )
+                        step_messages.append({"role": "assistant", "content": response_text})
+                        step_messages.append({"role": "user", "content": loop_msg})
+                        execution_log.append({
+                            "step": len(execution_log),
+                            "role": "tool_result",
+                            "content": "LOOP DETECTED: Identical consecutive calls detected.",
+                        })
+                        recent_tool_calls.clear()
+                        continue
+
+                # Check for alternating file write pattern (same 1-2 files rewritten repeatedly)
+                write_file_calls = [c for c in recent_tool_calls if c.startswith("write_file:")]
+                if len(write_file_calls) >= 4:
+                    written_paths = set()
+                    for call in write_file_calls:
+                        try:
+                            args_str = call[len("write_file:"):]
+                            call_args = json.loads(args_str)
+                            path = call_args.get("path", "")
+                            written_paths.add(path)
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+                    if len(written_paths) <= 2:
+                        paths_str = ", ".join(sorted(written_paths))
+                        loop_msg = (
+                            f"CRITICAL LOOP DETECTED: You have written the same file(s) repeatedly "
+                            f"({paths_str}) {len(write_file_calls)} times without making progress. "
+                            f"This is a loop.\n\n"
+                            f"You MUST stop making tool calls and immediately call finish_task:\n"
+                            f'{{"tool": "finish_task", "args": {{"summary": "Completed step: {step_desc}"}}}}\n\n'
+                            f"Call finish_task NOW."
+                        )
+                        step_messages.append({"role": "assistant", "content": response_text})
+                        step_messages.append({"role": "user", "content": loop_msg})
+                        execution_log.append({
+                            "step": len(execution_log),
+                            "role": "tool_result",
+                            "content": "LOOP DETECTED: Alternating file write pattern detected.",
+                        })
+                        recent_tool_calls.clear()
+                        continue
+
+                # Analysis loop nudging: 2+ read-only tool calls without writing
+                non_finish_calls = [c for c in recent_tool_calls if not c.startswith("finish_task:")]
+                if len(non_finish_calls) >= 2:
+                    write_calls = [c for c in non_finish_calls if c.startswith("write_file:") or c.startswith("edit_file:") or c.startswith("edit_lines:")]
+                    if len(write_calls) == 0:
+                        if "_analysis_nudge_count" not in step_vars:
+                            step_vars["_analysis_nudge_count"] = 0
+                        step_vars["_analysis_nudge_count"] += 1
+                        nudge_count = step_vars["_analysis_nudge_count"]
+
+                        if nudge_count >= 2:
+                            # Force-finish the step
+                            summary = f"Step auto-completed after {nudge_count} analysis loop nudges: {step_desc}"
+                            completed_step_summaries.append(f"{step_desc} -> {summary}")
+                            execution_log.append({
+                                "step": len(execution_log),
+                                "role": "system",
+                                "content": f"✅ Step {step_num} Auto-Completed (analysis loop): {summary}",
+                            })
+                            print(f"✅ Auto-completed step {step_num} due to analysis loop ({nudge_count} nudges)")
+                            step_success = True
+                            stop_after_tools = True
+                            step_messages.append({"role": "assistant", "content": response_text})
+                            step_messages.append({"role": "user", "content": (
+                                f"CRITICAL: You were stuck in an analysis loop after {nudge_count} warnings. "
+                                f"The step has been auto-completed. Call finish_task to proceed."
+                            )})
+                            recent_tool_calls.clear()
+                            break
+                        else:
+                            nudge_msg = (
+                                f"WARNING: You have made {len(non_finish_calls)} tool calls without writing any files "
+                                f"or calling finish_task. You are likely stuck in an analysis loop.\n\n"
+                                f"CURRENT STEP: {step_desc}\n\n"
+                                f"Warning {nudge_count}/2. After 2 warnings, the step will be auto-completed.\n\n"
+                                f"IMPORTANT: 'write_file' automatically creates parent directories. Do NOT list_dir first - just write files directly.\n\n"
+                                f"Your current tool calls have been discarded. If you have enough information, "
+                                f"start implementing by calling write_file or edit_file. "
+                                f"If the step is already complete, call finish_task immediately."
+                            )
+                            step_messages.append({"role": "assistant", "content": response_text})
+                            step_messages.append({"role": "user", "content": nudge_msg})
+                            execution_log.append({
+                                "step": len(execution_log),
+                                "role": "tool_result",
+                                "content": f"WARNING: Analysis loop detected - nudging toward implementation (nudge {nudge_count}/2).",
+                            })
+                            recent_tool_calls.clear()
+                            continue
 
             combined_result = "\n---\n".join(all_results)
             step_messages.append({"role": "assistant", "content": response_text})

@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Tuple, Optional, Callable
 from maria.provider import create_provider, PROVIDER_URLS
 from maria.agents.utils import parse_agent_response
 from maria.provider.base import format_messages_to_prompt
+from maria.runaway import is_runaway_response, truncate_runaway
 
 
 def execute_single_step(
@@ -18,12 +19,19 @@ def execute_single_step(
     model_think: bool,
     complexity: str,
     on_log: Optional[Callable] = None,
+    project_structure: str = "",
 ) -> Tuple[bool, str]:
     """Execute a single step using its own LLM client and tool executor."""
     from maria.tools import ToolExecutor
 
     executor = ToolExecutor(workspace_path)
     provider = create_provider(provider_type, base_url=base_url, model_think=model_think)
+
+    project_structure_context = ""
+    if project_structure:
+        project_structure_context = "\nPROJECT STRUCTURE OVERVIEW (files to be created):\n"
+        project_structure_context += project_structure + "\n"
+        project_structure_context += "CRITICAL: When calling write_file, you MUST use the EXACT paths shown above (e.g. 'src/entity_factory.py' NOT just 'entity_factory.py'). The paths include directory prefixes like 'src/' or 'tests/'. Using wrong paths will place files in the wrong location.\n"
 
     messages = [
         {"role": "system", "content": system_message},
@@ -32,7 +40,7 @@ def execute_single_step(
             "content": f"""We are executing a multi-stage plan.
 Complete Plan:
 {plan}
-{completed_context}
+{completed_context}{project_structure_context}
 Step Description: {step_desc}
 
 {"Do exactly what is asked. Do NOT over-engineer." if complexity == "simple" else "ORGANIZATION RULE:\n- Split code into separate files\n- Each file should contain related functions"}
@@ -60,6 +68,10 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
             final_summary = f"Error: {e}"
             break
 
+        # Cap runaway responses before storing in message history
+        if is_runaway_response(response_text):
+            response_text = truncate_runaway(response_text)
+
         tool_name, args = parse_agent_response(response_text)
         if not tool_name:
             messages.append({"role": "user", "content": "Please output a valid JSON tool call."})
@@ -80,7 +92,7 @@ When you believe this step is fully complete, call the 'finish_task' tool with a
             elif tool_name == "grep":         result = executor.grep(args.get("pattern", ""), args.get("path", "."))
             elif tool_name == "find_in_files": result = executor.find_in_files(args.get("pattern", ""), args.get("path", "."))
             elif tool_name == "grep_output":  result = executor.grep_output(args.get("pattern", ""), args.get("path", "."))
-            elif tool_name == "run_command":  result = executor.run_command(args.get("command", ""))
+            elif tool_name == "run_lint":     result = executor.run_lint(args.get("language", "python"), args.get("path", "."))
             else: result = f"Error: Unknown tool '{tool_name}'"
         except Exception as e:
             result = f"Error: {e}"
@@ -114,6 +126,7 @@ def run_parallel_group(
     model_think: bool,
     complexity: str,
     on_log: Optional[Callable] = None,
+    project_structure: str = "",
 ) -> List[Tuple[int, bool, str]]:
     """
     Run a group of steps in parallel on different providers.
@@ -140,6 +153,7 @@ def run_parallel_group(
             model_think=model_think,
             complexity=complexity,
             on_log=on_log,
+            project_structure=project_structure,
         )
         results[i] = (step_idx, success, summary)
 

@@ -8,9 +8,9 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
   edit_lines:        { icon: 'fa-solid fa-lines-leaning',   color: '#f59e0b' },
   grep:              { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
   find_in_files:     { icon: 'fa-solid fa-search',          color: '#a855f7' },
-  grep_output:       { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
-  run_command:       { icon: 'fa-solid fa-terminal',        color: '#ef4444' },
-  start_http_server: { icon: 'fa-solid fa-server',          color: '#0ea5e9' },
+   grep_output:       { icon: 'fa-solid fa-magnifying-glass', color: '#a855f7' },
+   run_lint:          { icon: 'fa-solid fa-broom',           color: '#8b5cf6' },
+   start_http_server: { icon: 'fa-solid fa-server',          color: '#0ea5e9' },
   stop_http_server:  { icon: 'fa-solid fa-stop',            color: '#f43f5e' },
   list_http_servers: { icon: 'fa-solid fa-list-ul',         color: '#0ea5e9' },
   finish_task:       { icon: 'fa-solid fa-flag-checkered',  color: '#10b981' },
@@ -52,7 +52,7 @@ export function formatLlmUsage(usage?: LlmUsage): string {
     parts.push(`Total: ${usage.tokens}`);
   }
 
-  return parts.length ? `Ollama: ${parts.join(' | ')}` : '';
+  return parts.length ? `Ollama:\n${parts.join(' | ')}` : '';
 }
 
 export function formatDate(dateStr?: string): string {

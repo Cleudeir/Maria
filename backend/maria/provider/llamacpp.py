@@ -114,6 +114,10 @@ class LlamaCppProvider(LLMProvider):
         return "llamacpp"
 
     @property
+    def max_context_window(self) -> int:
+        return 8192
+
+    @property
     def last_usage(self) -> Dict[str, Any]:
         return getattr(_thread_local, "last_usage", {})
 
@@ -257,7 +261,7 @@ class LlamaCppProvider(LLMProvider):
             full_msg = f"llamacpp request failed{error_text}"
             print(f"[llamacpp] ERROR: {full_msg}", flush=True)
             _save_generation_log(system_text, messages, response_output, {}, finish_reason, error=full_msg)
-            if status_code == 400 and ("exceeds the available context size" in error_text or "Context size has been exceeded" in error_text):
+            if (status_code in (400, 500)) and ("exceeds the available context size" in error_text or "Context size has been exceeded" in error_text):
                 raise ContextExceededError(full_msg)
             if status_code in (429, 503) or isinstance(e, requests.exceptions.Timeout):
                 raise RetryableError(full_msg)

@@ -1,13 +1,12 @@
 import os
 import re
-import select
 import socket
 import subprocess
 import signal
 import sys
 import threading
 import time
-from maria.security import is_path_safe, is_command_critical, prompt_user_approval
+from maria.security import is_path_safe
 
 BINARY_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
@@ -340,6 +339,16 @@ class ToolExecutor:
             return "Error: Access Denied. Internal system file."
 
         try:
+            # Check if file already exists with identical content
+            if os.path.exists(target_file):
+                try:
+                    with open(target_file, "r", encoding="utf-8") as f:
+                        existing_content = f.read()
+                    if existing_content == content:
+                        return f"Warning: File '{path}' already exists with identical content. No changes made."
+                except Exception:
+                    pass  # If we can't read it, proceed to overwrite
+
             # Create parent directories if needed
             os.makedirs(os.path.dirname(target_file), exist_ok=True)
             with open(target_file, "w", encoding="utf-8") as f:
@@ -565,120 +574,50 @@ class ToolExecutor:
         except Exception as e:
             return f"Error: Failed to edit file: {e}"
 
-    COMMAND_TIMEOUT = 600
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    def run_command(self, command: str) -> str:
+    def run_lint(self, language: str = "python", path: str = ".") -> str:
         """
-        Runs command inside the workspace output directory, with security controls.
+        Runs a linter on files in the workspace output directory.
+        Supported languages: "python" (uses ruff) and "typescript" (uses eslint).
+        Accepts both file and directory paths.
         """
-        # Command checks
-        if is_command_critical(command):
-            # Prompt the user for approval
-            approved = prompt_user_approval(command)
-            if not approved:
-                return "Error: Command execution rejected by user."
+        target_dir, error = self._resolve_output_path(path)
+        if error:
+            return error
+        if not os.path.exists(target_dir):
+            return f"Error: Path '{path}' does not exist."
 
-        output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
-        os.makedirs(output_dir, exist_ok=True)
-
-        preexec_fn = None
-        creationflags = 0
-        if os.name != "nt":
-            preexec_fn = os.setsid
+        if language == "python":
+            cmd = ["ruff", "check", target_dir]
+            cwd = self.PROJECT_ROOT
+        elif language == "typescript":
+            eslint_config = os.path.join(self.PROJECT_ROOT, "frontend", "eslint.config.js")
+            cmd = ["npx", "eslint", target_dir, "--config", eslint_config]
+            cwd = os.path.join(self.PROJECT_ROOT, "frontend")
         else:
-            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-
-        process = None
-        pgid = None
-        if self.task_id and os.name != "nt":
-            # On POSIX, the process PID becomes the process group ID after setsid.
-            pgid = None
-
-        start_time = time.time()
-        deadline = start_time + self.COMMAND_TIMEOUT
+            return f"Error: Unsupported language '{language}'. Use 'python' or 'typescript'."
 
         try:
-            process = subprocess.Popen(
-                command,
-                shell=True,
-                cwd=output_dir,
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
                 text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=1,
-                preexec_fn=preexec_fn,
-                creationflags=creationflags,
+                cwd=cwd,
+                timeout=60,
             )
-
-            if self.task_id:
-                pgid = process.pid
-                register_task_process_group(self.task_id, pgid)
-
-            output_lines = []
-            timed_out = False
-
-            while True:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    timed_out = True
-                    break
-
-                rlist, _, _ = select.select([process.stdout], [], [], min(remaining, 0.5))
-                if rlist:
-                    line = process.stdout.readline()
-                    if not line:
-                        break
-                    output_lines.append(line)
-                    if self.output_callback:
-                        self.output_callback(line.rstrip("\n"))
-
-            process.stdout.close()
-            process.wait(timeout=5)
-
-            if timed_out:
-                try:
-                    if pgid is not None:
-                        if os.name == "nt":
-                            process.send_signal(signal.CTRL_BREAK_EVENT)
-                        else:
-                            os.killpg(pgid, signal.SIGTERM)
-                    process.kill()
-                except Exception:
-                    pass
-                elapsed = time.time() - start_time
-                return f"Error: Command timed out after {elapsed:.1f}s (limit {self.COMMAND_TIMEOUT}s)."
-
-            elapsed = time.time() - start_time
-            output = "".join(output_lines)
-            header = (
-                f"━━━ Command ━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"  $ {command}\n"
-                f"  Directory: {output_dir}\n"
-                f"  Duration: {elapsed:.1f}s\n"
-                f"  Exit code: {process.returncode}\n"
-                f"━━━ Output ━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            )
-            full = header + output
-            if process.returncode != 0:
-                return f"Error: Command exited with code {process.returncode}.\n{full.strip()}"
-            return f"Success: Command executed successfully.\n{full.strip()}"
-
+            output = result.stdout + result.stderr
+            if result.returncode == 0:
+                return f"Success: No lint issues found.\n{output.strip()}" if output.strip() else "Success: No lint issues found."
+            return f"Lint found issues (exit code {result.returncode}):\n{output.strip()}"
+        except FileNotFoundError:
+            if language == "python":
+                return "Error: 'ruff' not found. Install with: pip install ruff"
+            return "Error: 'npx' not found or eslint not available. Ensure Node.js is installed."
+        except subprocess.TimeoutExpired:
+            return "Error: Lint timed out after 60 seconds."
         except Exception as e:
-            elapsed = time.time() - start_time
-            try:
-                if pgid is not None:
-                    if os.name == "nt":
-                        process.send_signal(signal.SIGTERM)
-                    else:
-                        os.killpg(pgid, signal.SIGTERM)
-                if process:
-                    process.kill()
-            except Exception:
-                pass
-            return f"Error: Command failed after {elapsed:.1f}s: {e}"
-        finally:
-            if self.task_id and pgid is not None:
-                unregister_task_process_group(self.task_id, pgid)
+            return f"Error: Lint failed: {e}"
 
     DEFAULT_HTTP_PORT = 10010
     MAX_HTTP_PORT = 65535

@@ -56,6 +56,11 @@ export const api = {
       method: 'POST',
     }),
 
+  stopTask: (id: string) =>
+    request<Record<string, unknown>>(`/api/tasks/${id}/stop`, {
+      method: 'POST',
+    }),
+
   continueTask: (id: string) =>
     request<Record<string, unknown>>(`/api/tasks/${id}/continue`, {
       method: 'POST',

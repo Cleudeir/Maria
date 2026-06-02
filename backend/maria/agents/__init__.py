@@ -6,11 +6,13 @@ from maria.agents.utils import (
     parse_self_improvement_response,
     parse_compacted_lessons_response,
 )
+from maria.agents.generate_structure import generate_structure
 from maria.agents.self_improvement import SelfImprovementAgent
 from maria.agents.execute_steps import execute_steps
 
 __all__ = [
     "MariaAgent",
+    "generate_structure",
     "parse_agent_response",
     "parse_agent_responses",
     "is_llm_response",

@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
+import logging
 from typing import List, Dict, Any, Optional, Callable
 
 from maria.compact_context import compact_messages, total_tokens
+
+logger = logging.getLogger(__name__)
 
 
 class LoopDetectedError(Exception):
@@ -107,10 +110,11 @@ class LLMProvider(ABC):
         if total_tokens(messages) > int(self.max_context_window * 0.5):
             compacted = compact_messages(
                 messages,
-                token_budget=int(self.max_context_window * 0.45),
+                token_budget=int(self.max_context_window * 0.5),
                 max_context_tokens=self.max_context_window,
             )
             if compacted is not messages:
+                logger.info("provider: compacted %d messages -> %d", len(messages), len(compacted))
                 messages = compacted
         system_text, user_text = self._format_messages(messages)
         return self.generate(system_text, user_text, progress_callback=stream_callback)

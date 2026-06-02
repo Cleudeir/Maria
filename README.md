@@ -1,12 +1,12 @@
 # Maria
 
-Maria is a self-improving agentic SLM (Small Language Model) system that autonomously completes coding tasks using Ollama. It follows a multi-stage pipeline: prompt improvement, planning, step creation, execution, and verification.
+Maria is a self-improving agentic SLM (Small Language Model) system that autonomously completes coding tasks using Ollama. It follows a multi-stage pipeline: planning, step creation, and execution, with self-improvement learning from errors.
 
 ## Features
 
 - **Multi-stage pipeline**: Improves prompts, generates plans, breaks into steps, executes, and verifies
-- **Two execution modes**: `step` (manual approval per action) or `auto` (fully autonomous)
-- **Tool use**: list_dir, read_file, write_file, run_command, finish_task
+- **Execution mode**: `auto` (fully autonomous)
+- **Tool use**: list_dir, read_file, write_file, finish_task
 - **Self-improvement**: Learns from errors and stores lessons to prevent repeating mistakes
 - **Memory system**: Persistent system prompts and lessons across runs
 - **Task isolation**: Each task runs in its own workspace directory
@@ -49,7 +49,7 @@ python cli.py <command> [options]
 | `create "task"` | Create a new task |
 | `list` | List all tasks |
 | `get <task_id>` | Get task details |
-| `action <task_id> <action>` | Execute action (approve, modify, inject, resume, resume_auto, force_complete) |
+| `action <task_id> <action>` | Execute action (inject, resume, resume_auto, force_complete) |
 | `pause <task_id>` | Pause a running task |
 | `continue <task_id>` | Continue a failed task |
 | `delete <task_id>` | Delete a task |
@@ -63,8 +63,8 @@ python cli.py <command> [options]
 # Create a task and wait for completion
 python cli.py create "Build a snake game in Python" --mode auto --wait
 
-# Create a task in step mode (manual approval)
-python cli.py create "Create a REST API with Flask" --mode step
+# Create a task (auto mode)
+python cli.py create "Create a REST API with Flask" --mode auto
 
 # List all tasks
 python cli.py list
@@ -72,14 +72,8 @@ python cli.py list
 # Get task details (raw JSON)
 python cli.py get task_20260521_120000 --raw
 
-# Approve next action in step mode
-python cli.py action task_20260521_120000 approve
-
 # Inject user instruction
 python cli.py action task_20260521_120000 inject --user-prompt "Use pytest for testing"
-
-# Modify and approve a tool call
-python cli.py action task_20260521_120000 modify --modified-tool '{"name":"write_file","args":{"path":"main.py","content":"..."}}'
 
 # Pause a running task
 python cli.py pause task_20260521_120000
@@ -154,7 +148,6 @@ workspace/
       steps/
         step_001.md       # Step summaries
     output/               # Generated files
-    verification_report.md
 memory/
   system_prompt.md        # System prompt
   lessons.json            # Lessons learned
@@ -193,7 +186,7 @@ CLI options for `create`:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--max-steps` | 20 | Maximum execution steps |
-| `--mode` | step | `step` or `auto` |
+| `--mode` | auto | `auto` or `auto-whatsapp` |
 | `--model-think` | true | Enable model thinking |
 | `--no-model-think` | - | Disable model thinking |
 | `--provider` | llamacpp | Provider type |

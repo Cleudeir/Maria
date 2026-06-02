@@ -32,7 +32,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from maria.llm import LLMClient as OllamaClient
 from maria.provider import PROVIDER_URLS
 from maria.agents import parse_agent_response, MariaAgent
-from maria.security import is_command_critical
+from maria.runaway import is_runaway_response, truncate_runaway, has_text_loop, _MAX_RESPONSE_CHARS
+
 from maria.tools import ToolExecutor, terminate_task_process_groups, terminate_task_http_servers, list_http_servers, stop_http_server as stop_http_server_tool
 from maria.memory import (
     load_system_prompt,
@@ -42,6 +43,7 @@ from maria.memory import (
     save_lessons,
 )
 from maria.self_improvement import SelfImprovementAgent
+from maria.readme_generator import ReadmeGenerator
 from maria.provider.base import LoopDetectedError, ContextExceededError
 from maria.compact_context import compact_messages, estimate_tokens, total_tokens
 from maria.step_checkpoint import (
@@ -50,7 +52,6 @@ from maria.step_checkpoint import (
     restore_checkpoint_into_state,
     clear_checkpoint,
 )
-from maria.agents.analyze_parallelism import analyze_parallelism
 from maria.whatsapp_client import (
     send_admin_text,
     send_admin_ask,
@@ -59,9 +60,9 @@ from maria.whatsapp_client import (
 )
 from maria.webhook_handler import register_pending_ask, resolve_pending_ask, cleanup_stale_asks
 
-MAX_STAGE_RETRIES = 10
-MAX_TASK_RETRIES = 999  # effectively infinite - agent keeps trying until completion
-MAX_WHATSAPP_RETRIES = 999  # effectively infinite for auto-whatsapp mode
+MAX_STAGE_RETRIES = 5
+MAX_TASK_RETRIES = 5  # max overall retries before giving up
+MAX_WHATSAPP_RETRIES = 5  # max retries for auto-whatsapp mode
 TASK_RETRY_DELAY = 10  # seconds
 
 
@@ -162,44 +163,6 @@ def _is_whatsapp_mode(state: dict) -> bool:
     return state.get("mode") == "auto-whatsapp"
 
 
-def _is_auto_mode(state: dict) -> bool:
-    """True for auto and auto-whatsapp modes (agent runs autonomously without manual intervention)."""
-    if not state:
-        return False
-    return state.get("mode") in ("auto", "auto-whatsapp")
-
-
-def _handle_critical_command_with_whatsapp(task_id: str, state: dict, command: str):
-    if not whatsapp_configured():
-        state["status"] = "awaiting_intervention"
-        save_task_state(task_id, state)
-        return False
-    question = f"Critical command: `{command}`"
-    options = ["Approve", "Reject", "Pause and wait"]
-    result = send_admin_ask(question, options, task_id=task_id)
-    if result.get("success"):
-        ask_id = str(result.get("askId", ""))
-        if ask_id:
-            register_pending_ask(
-                ask_id, task_id, "critical_command",
-                options, {
-                    "command": command,
-                    "mode": state.get("mode"),
-                    "stage": state.get("stage"),
-                    "task": state.get("task", "")[:200],
-                }
-            )
-            state["execution_log"].append({
-                "step": state.get("step", 0),
-                "role": "system",
-                "content": f"🟡 WhatsApp approval request sent for critical command: {command}",
-            })
-    state["status"] = "awaiting_intervention"
-    state["details"] = f"Waiting for WhatsApp approval for: {command}"
-    save_task_state(task_id, state)
-    return True
-
-
 def _ask_whatsapp_for_guidance(task_id: str, state: dict, reason: str, ask_type: str = "stuck"):
     if not whatsapp_configured():
         return False
@@ -246,47 +209,7 @@ def _apply_whatsapp_intervention(task_id: str, state: dict, ask_data: dict, resp
     choice = options[response_index] if 0 <= response_index < len(options) else str(response_index)
     context = ask_data.get("context", {})
 
-    if ask_type == "critical_command":
-        command = context.get("command", "")
-        if choice == "Approve":
-            state["execution_log"].append({
-                "step": state.get("step", 0),
-                "role": "system",
-                "content": f"✅ WhatsApp: Critical command approved: {command}",
-            })
-            if state.get("messages"):
-                state["messages"].append({
-                    "role": "user",
-                    "content": f"USER APPROVED CRITICAL COMMAND:\nThe user has approved running: {command}\nProceed with execution.",
-                })
-            state["proposed_tool"] = {
-                "name": "run_command",
-                "args": {"command": command},
-            }
-        elif choice == "Reject":
-            state["execution_log"].append({
-                "step": state.get("step", 0),
-                "role": "system",
-                "content": f"❌ WhatsApp: Critical command rejected: {command}",
-            })
-            if state.get("messages"):
-                state["messages"].append({
-                    "role": "user",
-                    "content": f"USER REJECTED COMMAND:\nDo NOT run: {command}\nFind an alternative approach or skip this step.",
-                })
-            state["last_tool_result"] = f"Error: Command execution rejected by user via WhatsApp: {command}"
-        else:
-            state["execution_log"].append({
-                "step": state.get("step", 0),
-                "role": "system",
-                "content": f"⏸ WhatsApp: Task paused for: {command}",
-            })
-            state["status"] = "awaiting_intervention"
-            state["details"] = "Paused via WhatsApp"
-            save_task_state(task_id, state)
-            return
-
-    elif ask_type == "stuck":
+    if ask_type == "stuck":
         if choice == "Continue with same approach":
             reason = context.get("reason", "")
             state["execution_log"].append({
@@ -368,14 +291,18 @@ def load_task_state(task_id):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 state = json.load(f)
+            if not isinstance(state, dict):
+                return None
             if "execution_log" in state:
                 state["execution_log"] = _compact_execution_log(state["execution_log"])
             return state
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, TypeError):
             return None
 
 
 def save_task_state(task_id, state):
+    if not isinstance(state, dict):
+        return
     task_path = get_task_path(task_id)
     if is_task_stopped(task_id):
         return
@@ -386,7 +313,7 @@ def save_task_state(task_id, state):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     current_disk_state = json.load(f)
-                if current_disk_state.get("status") in ("completed", "failed"):
+                if isinstance(current_disk_state, dict) and current_disk_state.get("status") in ("completed", "failed"):
                     state["status"] = current_disk_state["status"]
                     if "details" in current_disk_state:
                         state["details"] = current_disk_state["details"]
@@ -478,7 +405,7 @@ def build_step_prompt(state):
         "You should output your reasoning and the next tool action in JSON format.",
         "\n",
         "Task:\n" + task_prompt,
-        f"\nCurrent step: {state.get('step', 0) + 1} of {state.get('max_steps', 0)}.\n",
+        f"\nCurrent step: {state.get('step', 0) + 1}.\n",
         "ORGANIZATION: Split code into separate files by domain/responsibility. "
         "Each file should contain related functions with a single purpose. "
         "Each function must have one clear responsibility.",
@@ -755,23 +682,22 @@ def run_agent_step_sync(
         state["last_tool_result"] = None
     if "last_user_intervention" not in state:
         state["last_user_intervention"] = None
-    if "verification_report" not in state:
-        state["verification_report"] = None
-    if "verification_verdict" not in state:
-        state["verification_verdict"] = None
-
     if "stage_retries" not in state:
         state["stage_retries"] = 0
 
+    if "created_files" not in state:
+        state["created_files"] = []
+
     if state["status"] not in (
         "running",
-        "awaiting_intervention",
-        "auto",
         "processando",
     ):
         if action != "inject":
             return state
         if state["status"] in ("completed", "failed"):
+            # Preserve created_files across re-initializations
+            preserved_created_files = state.get("created_files", [])
+            
             state["proposed_tool"] = {
                 "name": "generate_plan",
                 "args": {},
@@ -788,10 +714,11 @@ def run_agent_step_sync(
             state["last_user_intervention"] = user_prompt
             state["current_streaming_response"] = ""
             state["is_streaming"] = False
-            state["verification_report"] = None
-            state["verification_verdict"] = None
             state["errors_encountered"] = []
             state["details"] = None
+            state["created_files"] = preserved_created_files
+            state["project_structure"] = None
+            state["project_files_to_create"] = []
             if user_prompt:
                 state["task"] = user_prompt
             state["provider_type"] = "llamacpp"
@@ -803,10 +730,7 @@ def run_agent_step_sync(
                     "content": f"🔄 Task re-initialized with new prompt: {user_prompt or state['task']}",
                 }
             )
-            if _is_auto_mode(state):
-                state["status"] = "running"
-            else:
-                state["status"] = "awaiting_intervention"
+            state["status"] = "running"
             save_task_state(task_id, state)
             return state
 
@@ -918,92 +842,14 @@ def run_agent_step_sync(
             except Exception:
                 pass
 
-            # Transition to creating steps
-            state["stage"] = "creating_steps"
+            # Transition to generating project structure
+            state["stage"] = "generating_structure"
             state["stage_retries"] = 0
             state["proposed_tool"] = {
-                "name": "create_steps",
+                "name": "generate_structure",
                 "args": {},
             }
-            if not _is_auto_mode(state):
-                state["status"] = "awaiting_intervention"
-            else:
-                state["status"] = "running"
-            save_checkpoint(WORKSPACE_DIR, task_id, state)
-        except LoopDetectedError as e:
-            state["stage_retries"] += 1
-            if state["stage_retries"] >= MAX_STAGE_RETRIES:
-                state["status"] = "failed"
-                state["proposed_tool"] = None
-                state["details"] = f"Failed to generate plan: {e}"
-            else:
-                state["details"] = (
-                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
-                )
-                state["status"] = "running"
-                # After 2 retries, force simple mode for plan generation
-                if state["stage_retries"] >= 2:
-                    state["last_user_intervention"] = (
-                        f"⚠️ Você já tentou gerar um plano {state['stage_retries']} vezes e todas falharam.\n"
-                        f"Crie um plano MUITO MAIS SIMPLES. Use no máximo 2-3 etapas. Mantenha tudo em UM arquivo único.\n"
-                        f"Não crie arquivos separados para CSS, JS, config. Tudo em UM HTML autossuficiente."
-                    )
-                    state["complexity"] = "simple"
-            print(
-                f"[Stage] generating_plan loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
-                flush=True,
-            )
-        except Exception as e:
-            state["status"] = "failed"
-            state["proposed_tool"] = None
-            state["details"] = f"Failed to generate plan: {e}"
-            print(f"[Stage] generating_plan failed for {task_id}: {e}", flush=True)
-
-    elif state["stage"] == "creating_steps":
-        try:
-            callback = _start_streaming()
-            try:
-                plan_for_steps = state["plan"]
-                if state.get("last_user_intervention"):
-                    plan_for_steps += f"\n\nAdditional instructions: {state['last_user_intervention']}"
-                steps = agent.create_steps(plan_for_steps, stream_callback=callback, complexity=state.get("complexity", "complex"))
-            finally:
-                _stop_streaming()
-            state["steps"] = steps
-            try:
-                save_execution_plan_steps(workspace_path, steps)
-            except Exception:
-                pass
-            steps_str = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
-            state["execution_log"].append(
-                {
-                    "step": state["step"],
-                    "role": "system",
-                    "content": f"🛠️ Stage 2 Complete: Execution Steps:\n{steps_str}",
-                }
-            )
-
-            if not steps:
-                raise ValueError("No steps were generated by the LLM.")
-
-            # Transition to analyzing parallelism (or directly to executing_steps for simple tasks)
-            if state.get("complexity") == "simple":
-                state["stage"] = "executing_steps"
-                state["parallel_groups"] = [[i] for i in range(len(steps))]
-            else:
-                state["stage"] = "analyzing_parallelism"
-            state["stage_retries"] = 0
-            state["current_step_idx"] = 0
-            state["completed_step_summaries"] = []
-
-            state["proposed_tool"] = {
-                "name": "execute_step",
-                "args": {"step_num": 1, "description": steps[0]},
-            }
-            if not _is_auto_mode(state):
-                state["status"] = "awaiting_intervention"
-            else:
-                state["status"] = "running"
+            state["status"] = "running"
             save_checkpoint(WORKSPACE_DIR, task_id, state)
         except LoopDetectedError as e:
             state["stage_retries"] += 1
@@ -1016,8 +862,8 @@ def run_agent_step_sync(
                     f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
                 )
                 state["status"] = "running"
-                # After 2 retries, force fewer steps
-                if state["stage_retries"] >= 2:
+                # After first retry, force fewer steps
+                if state["stage_retries"] >= 1:
                     state["last_user_intervention"] = (
                         f"⚠️ Você já tentou criar etapas {state['stage_retries']} vezes.\n"
                         f"Crie no máximo 2-3 etapas. Seja agressivo em simplificar.\n"
@@ -1033,53 +879,130 @@ def run_agent_step_sync(
             state["details"] = f"Failed to create steps: {e}"
             print(f"[Stage] creating_steps failed for {task_id}: {e}", flush=True)
 
-    elif state["stage"] == "analyzing_parallelism":
+    elif state["stage"] == "generating_structure":
         try:
             callback = _start_streaming()
             try:
-                parallel_groups = analyze_parallelism(
-                    state["steps"], get_generate_fn=client.provider.generate, stream_callback=callback
+                project_structure = agent.generate_structure(
+                    state["plan"], stream_callback=callback
                 )
             finally:
                 _stop_streaming()
-            state["parallel_groups"] = parallel_groups
-            groups_str = ", ".join([str(g) for g in parallel_groups])
+            state["project_structure"] = project_structure
             state["execution_log"].append(
                 {
                     "step": state["step"],
                     "role": "system",
-                    "content": f"🔀 Stage 2.5 Complete: Parallel Groups: {groups_str}",
+                    "content": f"📁 Project Structure:\n{project_structure}",
                 }
             )
-            # Transition to executing steps
-            state["stage"] = "executing_steps"
+            state["project_files_to_create"] = parse_project_structure_to_files(project_structure)
+
+            # Transition to regenerating plan with structure paths
+            state["stage"] = "regenerating_plan"
             state["stage_retries"] = 0
-            state["current_step_idx"] = 0
-            state["completed_step_summaries"] = []
-            state["proposed_tool"] = {
-                "name": "execute_step",
-                "args": {"step_num": 1, "description": state["steps"][0]},
-            }
-            if not _is_auto_mode(state):
-                state["status"] = "awaiting_intervention"
-            else:
-                state["status"] = "running"
+            state["proposed_tool"] = {"name": "regenerate_plan", "args": {}}
+            state["status"] = "running"
             save_checkpoint(WORKSPACE_DIR, task_id, state)
-        except LoopDetectedError as e:
-            state["stage_retries"] += 1
-            if state["stage_retries"] >= MAX_STAGE_RETRIES:
-                state["status"] = "failed"
-                state["proposed_tool"] = None
-                state["details"] = f"Failed to analyze parallelism: {e}"
-            else:
-                state["details"] = f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
-                state["status"] = "running"
-            print(f"[Stage] analyzing_parallelism loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}", flush=True)
         except Exception as e:
             state["status"] = "failed"
             state["proposed_tool"] = None
-            state["details"] = f"Failed to analyze parallelism: {e}"
-            print(f"[Stage] analyzing_parallelism failed for {task_id}: {e}", flush=True)
+            state["details"] = f"Failed to generate structure: {e}"
+            print(f"[Stage] generate_structure failed for {task_id}: {e}", flush=True)
+
+    elif state["stage"] == "regenerating_plan":
+        try:
+            callback = _start_streaming()
+            try:
+                updated_plan = agent.regenerate_plan(
+                    state["plan"],
+                    state["project_structure"],
+                    stream_callback=callback,
+                )
+            finally:
+                _stop_streaming()
+            state["plan"] = updated_plan
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"📋 Plan Updated with Structure Paths:\n{updated_plan}",
+                }
+            )
+            # Save updated plan
+            try:
+                plan_dir, _ = ensure_task_plan_dirs(workspace_path)
+                with open(
+                    os.path.join(plan_dir, "plan.md"), "w", encoding="utf-8"
+                ) as f:
+                    f.write(updated_plan)
+            except Exception:
+                pass
+
+            # Transition to creating steps
+            state["stage"] = "creating_steps"
+            state["stage_retries"] = 0
+            state["proposed_tool"] = {"name": "create_steps", "args": {}}
+            state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+        except Exception as e:
+            state["status"] = "failed"
+            state["proposed_tool"] = None
+            state["details"] = f"Failed to regenerate plan: {e}"
+            print(f"[Stage] regenerating_plan failed for {task_id}: {e}", flush=True)
+
+    elif state["stage"] == "creating_steps":
+        try:
+            callback = _start_streaming()
+            try:
+                steps = agent.create_steps(
+                    state["plan"],
+                    stream_callback=callback,
+                    complexity=state.get("complexity", "complex"),
+                )
+            finally:
+                _stop_streaming()
+            state["steps"] = steps
+            steps_str = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps))
+            state["execution_log"].append(
+                {
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"🛠️ Stage 2 Complete: Execution Steps:\n{steps_str}",
+                }
+            )
+
+            # Save execution_plan_steps.md for compatibility
+            try:
+                plan_dir, _ = ensure_task_plan_dirs(workspace_path)
+                with open(
+                    os.path.join(plan_dir, "execution_plan_steps.md"),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    f.write("# Execution Plan Steps\n\n")
+                    for i, s in enumerate(steps, 1):
+                        f.write(f"{i}. {s}\n")
+            except Exception:
+                pass
+
+            # Transition to executing steps
+            state["stage"] = "executing_steps"
+            state["current_step_idx"] = 0
+            state["proposed_tool"] = {
+                "name": "execute_step",
+                "args": {
+                    "step_num": 1,
+                    "description": steps[0] if steps else "",
+                },
+            }
+            state["status"] = "running"
+            save_checkpoint(WORKSPACE_DIR, task_id, state)
+        except Exception as e:
+            state["status"] = "failed"
+            state["proposed_tool"] = None
+            state["details"] = f"Failed to create steps: {e}"
+            print(f"[Stage] creating_steps failed for {task_id}: {e}", flush=True)
 
     elif state["stage"] == "executing_steps":
         steps = state["steps"]
@@ -1130,6 +1053,7 @@ def run_agent_step_sync(
                     primary_provider=state.get("provider_type", "llamacpp"),
                     model_think=state.get("model_think", False),
                     complexity=state.get("complexity", "complex"),
+                    project_structure=state.get("project_structure", ""),
                 )
 
                 # Process results
@@ -1154,8 +1078,51 @@ def run_agent_step_sync(
                         "args": {"step_num": next_idx + 1, "description": steps[next_idx]},
                     }
                 else:
-                    state["stage"] = "verifying"
-                    state["messages"] = []
+                    planned = state.get("project_files_to_create", [])
+                    created = state.get("created_files", [])
+                    created_set = {f.get("path", "") for f in created}
+                    missing = [f for f in planned if f.get("path", "") not in created_set]
+
+                    if missing:
+                        missing_paths = [f.get("path") for f in missing]
+                        file_list = "\n".join(f"- {p}" for p in missing_paths)
+                        step_desc = (
+                            f"Create files still missing from the project structure:\n{file_list}\n\n"
+                            "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                        )
+                        state["project_structure"] = json.dumps(missing_paths)
+                        state["project_files_to_create"] = missing
+                        state["steps"].append(step_desc)
+                        state["current_step_idx"] = len(state["steps"]) - 1
+                        state["proposed_tool"] = {
+                            "name": "execute_step",
+                            "args": {
+                                "step_num": len(state["steps"]),
+                                "description": step_desc,
+                            },
+                        }
+                        state["status"] = "running"
+                        state["execution_log"].append({
+                            "step": state["step"],
+                            "role": "system",
+                            "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                        })
+                    else:
+                        state["stage"] = "completed"
+                        state["status"] = "completed"
+                        state["details"] = "All steps executed successfully."
+                        state["proposed_tool"] = None
+                        state["messages"] = []
+                        try:
+                            add_task_history(
+                                MEMORY_DIR, state["task"], "SUCCESS",
+                                "All steps executed successfully."
+                            )
+                        except Exception:
+                            pass
+                        if state.get("errors_encountered"):
+                            trigger_self_improvement(task_id, state)
+                        trigger_readme_generation(task_id, state)
 
                 save_checkpoint(WORKSPACE_DIR, task_id, state)
 
@@ -1167,6 +1134,27 @@ def run_agent_step_sync(
                     for idx, summary in enumerate(state["completed_step_summaries"], 1):
                         completed_context += f"Step {idx}: {summary}\n"
 
+                # Inject created files context
+                created_files_context = ""
+                created_files = state.get("created_files", [])
+                if created_files:
+                    created_files_context = "\nCRITICAL: Files already created in this workspace:\n"
+                    for entry in created_files:
+                        path = entry.get("path", "")
+                        created_at = entry.get("created_at", "")
+                        step = entry.get("step", "")
+                        step_info = f" (step {step})" if step else ""
+                        created_files_context += f"- {path}{step_info}\n"
+                    created_files_context += "\nIMPORTANT: Use list_dir and read_file to inspect existing files before creating new ones. Do NOT recreate files that already exist unless explicitly required.\n"
+
+                # Inject project structure overview
+                project_structure_context = ""
+                project_structure = state.get("project_structure")
+                if project_structure:
+                    project_structure_context = "\nPROJECT STRUCTURE OVERVIEW (files to be created):\n"
+                    project_structure_context += project_structure + "\n"
+                    project_structure_context += "CRITICAL: When calling write_file, you MUST use the EXACT paths shown above (e.g. 'src/entity_factory.py' NOT just 'entity_factory.py'). The paths include directory prefixes like 'src/' or 'tests/'. Using wrong paths will place files in the wrong location.\n"
+
                 state["messages"] = [
                     {"role": "system", "content": system_message},
                     {
@@ -1174,11 +1162,13 @@ def run_agent_step_sync(
                         "content": f"""We are executing a multi-stage plan.
 Complete Plan:
 {state["plan"]}
-{completed_context}
+{completed_context}{created_files_context}{project_structure_context}
 Current Step: Step {step_num} of {total_steps}
 Step Description: {steps[curr_idx]}
 
 {"Do exactly what is asked. Do NOT over-engineer. Do NOT create extra files or architecture." if state.get("complexity") == "simple" else "ORGANIZATION RULE:\n- Split code into separate files by domain/responsibility\n- Each file should contain related functions with a single purpose\n- Each function must have one clear responsibility"}
+
+IMPORTANT: 'write_file' automatically creates parent directories. You do NOT need to create directories first - just write files directly.
 
 Your objective is to complete ONLY this step using your tools.
 When you believe this step is fully complete, call the 'finish_task' tool with a summary of what you did.
@@ -1205,6 +1195,7 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                     )
                 state["last_user_intervention"] = None
                 state["_recent_tool_calls"] = []
+                state["step"] = 0
 
                 # Get first tool proposal
                 state = run_llm_for_tool(state, client)
@@ -1219,7 +1210,7 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 args = last_proposed.get("args", {})
                 if tool_name:
                     applied_action_descr = f"Approved & Executed: {tool_name} {args}"
-                    tool_result = execute_tool_call(executor, tool_name, args)
+                    tool_result = execute_tool_call(executor, tool_name, args, state.get("project_structure"))
                 else:
                     applied_action_descr = "Approved & continued"
 
@@ -1227,7 +1218,7 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
                 tool_name = modified_tool.get("name")
                 args = modified_tool.get("args", {})
                 applied_action_descr = f"Modified & Executed: {tool_name} {args}"
-                tool_result = execute_tool_call(executor, tool_name, args)
+                tool_result = execute_tool_call(executor, tool_name, args, state.get("project_structure"))
 
             if tool_result is not None:
                 state["current_command_output"] = ""
@@ -1289,90 +1280,44 @@ CRITICAL: Do not ask the user for input, next steps, feedback, or choices. Do no
             state = run_llm_for_tool(state, client)
 
     elif state["stage"] == "verifying":
-        try:
-            callback = _start_streaming()
-            try:
-                plan_for_verify = state["plan"]
-                if state.get("last_user_intervention"):
-                    plan_for_verify += f"\n\nAdditional instructions from user: {state['last_user_intervention']}"
-                verdict, report = agent.verify_execution(
-                    plan_for_verify, state["steps"], stream_callback=callback,
-                    complexity=state.get("complexity", "complex")
-                )
-            finally:
-                _stop_streaming()
-            state["execution_log"].append(
-                {
-                    "step": state["step"],
-                    "role": "system",
-                    "content": f"🔍 Stage 3 Complete: Final Verification Report:\n{report}\n\nVerdict: {verdict}",
-                }
-            )
+        planned = state.get("project_files_to_create", [])
+        created = state.get("created_files", [])
+        created_set = {f.get("path", "") for f in created}
+        missing = [f for f in planned if f.get("path", "") not in created_set]
 
-            try:
-                with open(
-                    os.path.join(workspace_path, "verification_report.md"),
-                    "w",
-                    encoding="utf-8",
-                ) as f:
-                    f.write(f"# Verification Report\n\nVerdict: {verdict}\n\n{report}")
-            except Exception:
-                pass
-
-            state["proposed_tool"] = None
-            state["verification_report"] = report
-            state["verification_verdict"] = verdict
-            if state.get("verification_verdict") == "SUCCESS":
-                state["status"] = "completed"
-                state["details"] = "Verification passed."
-                try:
-                    add_task_history(
-                        MEMORY_DIR, state["task"], "SUCCESS", "Verification passed."
-                    )
-                except Exception:
-                    pass
-            else:
-                state["status"] = "failed"
-                state["details"] = f"Verification failed. Verdict: {state.get('verification_verdict')}"
-                try:
-                    add_task_history(
-                        MEMORY_DIR,
-                        state["task"],
-                        "FAILED",
-                        f"Verdict: {state.get('verification_verdict')}",
-                    )
-                except Exception:
-                    pass
-            save_checkpoint(WORKSPACE_DIR, task_id, state)
-            trigger_self_improvement(task_id, state)
-        except LoopDetectedError as e:
-            state["stage_retries"] += 1
-            if state["stage_retries"] >= MAX_STAGE_RETRIES:
-                state["status"] = "failed"
-                state["details"] = f"Failed to verify execution: {e}"
-                trigger_self_improvement(task_id, state)
-            else:
-                state["details"] = (
-                    f"Retry {state['stage_retries']}/{MAX_STAGE_RETRIES} - {e}"
-                )
-                state["status"] = "running"
-            print(
-                f"[Stage] verifying loop detected for {task_id}: retry {state['stage_retries']}/{MAX_STAGE_RETRIES}",
-                flush=True,
+        if missing:
+            missing_paths = [f.get("path") for f in missing]
+            file_list = "\n".join(f"- {p}" for p in missing_paths)
+            step_desc = (
+                f"Create files still missing from the project structure:\n{file_list}\n\n"
+                "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
             )
-        except ContextExceededError as e:
-            state["status"] = "failed"
-            state["details"] = f"Verification context exceeded: workspace content too large for the LLM context window."
+            state["project_structure"] = json.dumps(missing_paths)
+            state["project_files_to_create"] = missing
+            state["steps"].append(step_desc)
+            state["current_step_idx"] = len(state["steps"]) - 1
+            state["proposed_tool"] = {
+                "name": "execute_step",
+                "args": {
+                    "step_num": len(state["steps"]),
+                    "description": step_desc,
+                },
+            }
+            state["status"] = "running"
             state["execution_log"].append({
                 "step": state["step"],
                 "role": "system",
-                "content": "⚠️ Verification failed because workspace content exceeded the context window.",
+                "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
             })
-            save_checkpoint(WORKSPACE_DIR, task_id, state)
-        except Exception as e:
-            state["status"] = "failed"
-            state["details"] = f"Failed to verify execution: {e}"
-            trigger_self_improvement(task_id, state)
+        else:
+            state["status"] = "completed"
+            state["stage"] = "completed"
+            state["details"] = "Task completed."
+            state["proposed_tool"] = None
+            if state.get("errors_encountered"):
+                trigger_self_improvement(state["task_id"], state)
+            trigger_readme_generation(state["task_id"], state)
+        save_checkpoint(WORKSPACE_DIR, task_id, state)
 
     save_task_state(task_id, state)
     return state
@@ -1383,11 +1328,13 @@ def run_llm_for_tool(state, client):
     Helper function to query LLM for the next tool call during step execution.
     Handles finish_task to transition steps or stages.
     """
-    max_retries = 10
+    max_retries = MAX_STAGE_RETRIES
 
     # Loop detection: track recent tool calls to detect repeated patterns
     if "_recent_tool_calls" not in state:
         state["_recent_tool_calls"] = []
+    if "_analysis_nudge_count" not in state:
+        state["_analysis_nudge_count"] = 0
     recent_tool_calls = state["_recent_tool_calls"]
 
     for attempt in range(max_retries):
@@ -1402,12 +1349,18 @@ def run_llm_for_tool(state, client):
             state["current_streaming_response"] = latest_text
             save_task_state(state["task_id"], state)
 
+        max_ctx = getattr(client.provider, 'max_context_window', 8192)
         compacted = compact_messages(
             state["messages"],
-            max_context_tokens=32768,
+            max_context_tokens=max_ctx,
         )
         if compacted != state["messages"]:
             state["messages"] = compacted
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": "📏 Message history compacted to fit context window.",
+            })
             save_task_state(state["task_id"], state)
 
         try:
@@ -1419,11 +1372,12 @@ def run_llm_for_tool(state, client):
         except ContextExceededError:
             state["is_streaming"] = False
             state["step"] -= 1
+            max_ctx = getattr(client.provider, 'max_context_window', 8192)
             compacted = compact_messages(
                 state["messages"],
-                token_budget=12000,
+                token_budget=int(max_ctx * 0.35),
                 keep_last=3,
-                max_context_tokens=32768,
+                max_context_tokens=max_ctx,
             )
             if compacted != state["messages"] and len(compacted) < len(state["messages"]):
                 state["messages"] = compacted
@@ -1483,6 +1437,40 @@ def run_llm_for_tool(state, client):
             state["is_streaming"] = False
             save_task_state(state["task_id"], state)
 
+        # Cap and sanitize runaway responses before storing
+        if is_runaway_response(response_text):
+            response_text = truncate_runaway(response_text)
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "system",
+                "content": "⚠️ Runaway generation detected and truncated.",
+            })
+        elif len(response_text) > _MAX_RESPONSE_CHARS:
+            response_text = truncate_runaway(response_text)
+
+        # Text loop detection: 20-char segment repeated 3+ times
+        if has_text_loop(response_text):
+            curr_idx = state.get("current_step_idx", 0)
+            step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+            response_text = "[Text loop detected - repeated content]"
+            err_guidance = (
+                f"CRITICAL LOOP DETECTED: Your response contains a repeating text pattern "
+                f"(the same 20-character segment repeated 3+ times). This is an LLM loop.\n\n"
+                f"ADVICE: To break out of this loop, try a completely different approach. "
+                f"Analyze what you have already done and what still needs to be done.\n\n"
+                f"CURRENT STEP: {step_desc}\n\n"
+                f"If you have already written the necessary code and the step is done, "
+                f"call finish_task with a summary of what you did to proceed."
+            )
+            state["messages"].append({"role": "user", "content": err_guidance})
+            state["execution_log"].append({
+                "step": state["step"],
+                "role": "tool_result",
+                "content": "LOOP DETECTED: Text-level loop (repeating 20-char segment 3+ times).",
+            })
+            recent_tool_calls.clear()
+            continue
+
         state["last_raw_response"] = response_text
         assistant_entry = {
             "step": state["step"],
@@ -1530,56 +1518,146 @@ def run_llm_for_tool(state, client):
                     recent_tool_calls.clear()
                     continue
 
-            # Also detect if no finish_task after 3 tool calls in same step
+            # Check for alternating file write pattern (same 1-2 files rewritten repeatedly)
+            write_file_calls = [c for c in recent_tool_calls if c.startswith("write_file:")]
+            if len(write_file_calls) >= 4:
+                written_paths = set()
+                for call in write_file_calls:
+                    try:
+                        args_str = call[len("write_file:"):]
+                        call_args = json.loads(args_str)
+                        path = call_args.get("path", "")
+                        written_paths.add(path)
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                if len(written_paths) <= 2:
+                    curr_idx = state.get("current_step_idx", 0)
+                    step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+                    paths_str = ", ".join(sorted(written_paths))
+                    loop_msg = (
+                        f"CRITICAL LOOP DETECTED: You have written the same file(s) repeatedly "
+                        f"({paths_str}) {len(write_file_calls)} times without making progress. "
+                        f"This is a loop.\n\n"
+                        f"You MUST stop making tool calls and immediately call finish_task:\n"
+                        f'{{"tool": "finish_task", "args": {{"summary": "Completed step: {step_desc}"}}}}\n\n'
+                        f"Call finish_task NOW."
+                    )
+                    state["messages"].append({"role": "user", "content": loop_msg})
+                    state["execution_log"].append(
+                        {
+                            "step": state["step"],
+                            "role": "tool_result",
+                            "content": f"LOOP DETECTED: Alternating file write pattern detected.",
+                        }
+                    )
+                    recent_tool_calls.clear()
+                    continue
+
+            # Also detect if no finish_task after tool calls in same step
             non_finish_calls = [c for c in recent_tool_calls if not c.startswith("finish_task:")]
-            if len(non_finish_calls) >= 3:
+            if len(non_finish_calls) >= 2:
                 # Check if any file writing actually happened
                 write_calls = [c for c in non_finish_calls if c.startswith("write_file:") or c.startswith("edit_file:") or c.startswith("edit_lines:")]
                 if len(write_calls) == 0:
-                    # Check if recent calls are all the same run_command (likely test loop)
-                    run_calls = [c for c in non_finish_calls if c.startswith("run_command:")]
-                    if len(run_calls) >= 3:
-                        # Check if last 3 run_command calls are identical
-                        last_three_runs = non_finish_calls[-3:]
-                        if all(c.startswith("run_command:") for c in last_three_runs):
-                            # Same command repeated - likely stuck on test failures
-                            curr_idx = state.get("current_step_idx", 0)
-                            step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
-                            nudge_msg = (
-                                f"WARNING: You have run the same command multiple times without making progress.\n\n"
-                                f"CURRENT STEP: {step_desc}\n\n"
-                                f"If tests are failing, fix the code first using write_file or edit_file. "
-                                f"Do not keep running the same failing command. "
-                                f"If the step is complete, call finish_task immediately."
-                            )
-                            state["messages"].append({"role": "user", "content": nudge_msg})
-                            state["execution_log"].append(
-                                {
-                                    "step": state["step"],
-                                    "role": "tool_result",
-                                    "content": f"WARNING: Repeated command loop detected - fix code or finish step.",
+                    curr_idx = state.get("current_step_idx", 0)
+                    step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
+                    analysis_nudge_count = state.get("_analysis_nudge_count", 0) + 1
+                    state["_analysis_nudge_count"] = analysis_nudge_count
+
+                    if analysis_nudge_count >= 2:
+                        # Force-finish the step after 3 consecutive analysis loop nudges
+                        summary = f"Step auto-completed after {analysis_nudge_count} analysis loop nudges: {step_desc}"
+                        state["completed_step_summaries"].append(f"{step_desc} -> {summary}")
+                        state["execution_log"].append({
+                            "step": state["step"],
+                            "role": "system",
+                            "content": f"✅ Step {curr_idx + 1} Auto-Completed (analysis loop): {summary}",
+                        })
+                        state["messages"].append({"role": "user", "content": (
+                            f"CRITICAL: You were stuck in an analysis loop after {analysis_nudge_count} warnings. "
+                            f"The step has been auto-completed to prevent infinite looping.\n\n"
+                            f"Your tool call was NOT executed. The next step will begin."
+                        )})
+                        recent_tool_calls.clear()
+                        state["_analysis_nudge_count"] = 0
+
+                        next_idx = curr_idx + 1
+                        if next_idx < len(state["steps"]):
+                            state["current_step_idx"] = next_idx
+                            state["proposed_tool"] = {
+                                "name": "execute_step",
+                                "args": {
+                                    "step_num": next_idx + 1,
+                                    "description": state["steps"][next_idx],
+                                },
+                            }
+                            state["status"] = "running"
+                        else:
+                            planned = state.get("project_files_to_create", [])
+                            created = state.get("created_files", [])
+                            created_set = {f.get("path", "") for f in created}
+                            missing = [f for f in planned if f.get("path", "") not in created_set]
+
+                            if missing:
+                                missing_paths = [f.get("path") for f in missing]
+                                file_list = "\n".join(f"- {p}" for p in missing_paths)
+                                step_desc = (
+                                    f"Create files still missing from the project structure:\n{file_list}\n\n"
+                                    "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                                )
+                                state["project_structure"] = json.dumps(missing_paths)
+                                state["project_files_to_create"] = missing
+                                state["steps"].append(step_desc)
+                                state["current_step_idx"] = len(state["steps"]) - 1
+                                state["proposed_tool"] = {
+                                    "name": "execute_step",
+                                    "args": {
+                                        "step_num": len(state["steps"]),
+                                        "description": step_desc,
+                                    },
                                 }
-                            )
-                            recent_tool_calls.clear()
-                            continue
+                                state["status"] = "running"
+                                state["execution_log"].append({
+                                    "step": state["step"],
+                                    "role": "system",
+                                    "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                                })
+                            else:
+                                state["stage"] = "completed"
+                                state["status"] = "completed"
+                                state["details"] = "All steps executed successfully."
+                                state["proposed_tool"] = None
+                                try:
+                                    add_task_history(
+                                        MEMORY_DIR, state["task"], "SUCCESS",
+                                        "All steps executed successfully."
+                                    )
+                                except Exception:
+                                    pass
+                                if state.get("errors_encountered"):
+                                    trigger_self_improvement(state["task_id"], state)
+                                trigger_readme_generation(state["task_id"], state)
+                        save_checkpoint(WORKSPACE_DIR, state["task_id"], state)
+                        return state
                     else:
-                        curr_idx = state.get("current_step_idx", 0)
-                        step_desc = state["steps"][curr_idx] if state.get("steps") else "current step"
                         nudge_msg = (
                             f"WARNING: You have made {len(non_finish_calls)} tool calls without writing any files "
                             f"or calling finish_task. You are likely stuck in an analysis loop.\n\n"
                             f"CURRENT STEP: {step_desc}\n\n"
-                            f"If you have enough information, start implementing by calling write_file or edit_file. "
+                            f"Warning {analysis_nudge_count}/2. After 2 warnings, the step will be "
+                            f"auto-completed and the tool call will be discarded.\n\n"
+                            f"IMPORTANT: 'write_file' automatically creates parent directories. You do NOT need to list_dir or create directories first. "
+                            f"Start implementing by calling write_file directly. "
                             f"If the step is already complete, call finish_task immediately."
                         )
                         state["messages"].append({"role": "user", "content": nudge_msg})
-                        state["execution_log"].append(
-                            {
-                                "step": state["step"],
-                                "role": "tool_result",
-                                "content": f"WARNING: Analysis loop detected - nudging toward implementation.",
-                            }
-                        )
+                        state["execution_log"].append({
+                            "step": state["step"],
+                            "role": "tool_result",
+                            "content": f"WARNING: Analysis loop detected - nudging toward implementation (nudge {analysis_nudge_count}/3).",
+                        })
+                        recent_tool_calls.clear()
+                        continue
         else:
             # No valid tool call - reset recent calls tracking
             recent_tool_calls.clear()
@@ -1592,7 +1670,7 @@ def run_llm_for_tool(state, client):
                 f"CORRECT FORMAT:\n"
                 f"Output your reasoning followed by exactly one tool call:\n"
                 f'{{"tool": "tool_name", "args": {{"parameter_name": "value"}}}}\n\n'
-                f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, run_command, start_http_server, stop_http_server, list_http_servers, finish_task\n\n"
+                f"Available tools: list_dir, read_file, write_file, edit_file, edit_lines, grep, find_in_files, grep_output, start_http_server, stop_http_server, list_http_servers, run_lint, finish_task\n\n"
                 f"CURRENT STEP: {step_desc}\n\n"
                 f"What you should do: Determine the next action for this step and output it in the correct JSON format. "
                 f"Do not ask questions or request input. Execute autonomously."
@@ -1613,12 +1691,13 @@ def run_llm_for_tool(state, client):
             if attempt < max_retries - 1:
                 continue
 
-            state["status"] = "awaiting_intervention"
+            state["status"] = "failed"
             state["proposed_tool"] = None
             return state
 
         if tool_name == "finish_task":
             recent_tool_calls.clear()
+            state["_analysis_nudge_count"] = 0
             summary = args.get("summary", "Step completed.")
             curr_idx = state["current_step_idx"]
             step_desc = state["steps"][curr_idx]
@@ -1641,29 +1720,57 @@ def run_llm_for_tool(state, client):
                         "description": state["steps"][next_idx],
                     },
                 }
-                if state.get("mode") != "auto":
-                    state["status"] = "awaiting_intervention"
-                else:
-                    state["status"] = "running"
+                state["status"] = "running"
             else:
-                state["stage"] = "verifying"
-                state["stage_retries"] = 0
-                state["proposed_tool"] = {
-                    "name": "verify_execution",
-                    "args": {},
-                }
-                if state.get("mode") != "auto":
-                    state["status"] = "awaiting_intervention"
-                else:
+                planned = state.get("project_files_to_create", [])
+                created = state.get("created_files", [])
+                created_set = {f.get("path", "") for f in created}
+                missing = [f for f in planned if f.get("path", "") not in created_set]
+
+                if missing:
+                    missing_paths = [f.get("path") for f in missing]
+                    file_list = "\n".join(f"- {p}" for p in missing_paths)
+                    step_desc = (
+                        f"Create files still missing from the project structure:\n{file_list}\n\n"
+                        "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                    )
+                    state["project_structure"] = json.dumps(missing_paths)
+                    state["project_files_to_create"] = missing
+                    state["steps"].append(step_desc)
+                    state["current_step_idx"] = len(state["steps"]) - 1
+                    state["proposed_tool"] = {
+                        "name": "execute_step",
+                        "args": {
+                            "step_num": len(state["steps"]),
+                            "description": step_desc,
+                        },
+                    }
                     state["status"] = "running"
+                    state["execution_log"].append({
+                        "step": state["step"],
+                        "role": "system",
+                        "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                    })
+                else:
+                    state["stage"] = "completed"
+                    state["status"] = "completed"
+                    state["details"] = "All steps executed successfully."
+                    state["proposed_tool"] = None
+                    try:
+                        add_task_history(
+                            MEMORY_DIR, state["task"], "SUCCESS",
+                            "All steps executed successfully."
+                        )
+                    except Exception:
+                        pass
+                    if state.get("errors_encountered"):
+                        trigger_self_improvement(state["task_id"], state)
+                    trigger_readme_generation(state["task_id"], state)
             save_checkpoint(WORKSPACE_DIR, state["task_id"], state)
             return state
 
         state["proposed_tool"] = {"name": tool_name, "args": args}
-        if state.get("mode") != "auto":
-            state["status"] = "awaiting_intervention"
-        else:
-            state["status"] = "running"
+        state["status"] = "running"
         save_checkpoint(WORKSPACE_DIR, state["task_id"], state)
         return state
 
@@ -1700,13 +1807,59 @@ def track_created_file(state, file_path, step_num=None):
     state["created_files"] = created_files
 
 
-def execute_tool_call(executor, name, args):
+def parse_project_structure_to_files(structure_text):
+    if not structure_text:
+        return []
+    try:
+        files = json.loads(structure_text)
+        if isinstance(files, list):
+            return [{"path": f} for f in files if isinstance(f, str) and f.strip()]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return []
+
+
+def _resolve_path_from_structure(path: str, project_structure) -> str:
+    """Correct any file path to match the project structure by basename lookup."""
+    if not path or not project_structure:
+        return path
+    # Parse structure if it's a JSON string
+    structure = project_structure
+    if isinstance(structure, str):
+        try:
+            structure = json.loads(structure)
+        except (json.JSONDecodeError, TypeError):
+            return path
+    if not isinstance(structure, list):
+        return path
+    basename = os.path.basename(path)
+    if not basename:
+        return path
+    # Find all entries matching this filename
+    candidates = [entry for entry in structure if isinstance(entry, str) and os.path.basename(entry) == basename]
+    if not candidates:
+        return path
+    # If only one match, use it
+    if len(candidates) == 1:
+        return candidates[0]
+    # Multiple matches — prefer shortest path (most specific location)
+    return min(candidates, key=len)
+
+
+def execute_tool_call(executor, name, args, project_structure=None):
     if name == "list_dir":
         return executor.list_dir(args.get("path", "."))
     elif name == "read_file":
         return executor.read_file(args.get("path", ""))
     elif name == "write_file":
-        return executor.write_file(args.get("path", ""), args.get("content", ""))
+        raw_path = args.get("path", "")
+        corrected_path = _resolve_path_from_structure(raw_path, project_structure)
+        result = executor.write_file(corrected_path, args.get("content", ""))
+        # If path was corrected, update args so callers track the actual path
+        if corrected_path != raw_path:
+            args["path"] = corrected_path
+            result = result.replace(f"'{raw_path}'", f"'{corrected_path}'")
+        return result
     elif name == "edit_file":
         return executor.edit_file(
             args.get("path", ""),
@@ -1731,8 +1884,8 @@ def execute_tool_call(executor, name, args):
         )
     elif name == "grep_output":
         return executor.grep_output(args.get("query", ""))
-    elif name == "run_command":
-        return executor.run_command(args.get("command", ""))
+    elif name == "run_lint":
+        return executor.run_lint(args.get("language", "python"), args.get("path", "."))
     else:
         return f"Error: Tool '{name}' is not supported."
 
@@ -1759,9 +1912,28 @@ def trigger_self_improvement(task_id, state):
 # --- Background Task Thread Loop ---
 
 
+def trigger_readme_generation(task_id, state):
+    """Generates a README.md in the output directory after task completion."""
+    task_path = get_task_path(task_id)
+
+    def run_generator():
+        try:
+            generator = ReadmeGenerator(task_path)
+            readme = generator.generate()
+            if readme:
+                generator.save_readme(readme)
+                print(f"📄 README.md generated for task {task_id}")
+        except Exception as e:
+            print(f"README generation failed: {e}")
+
+    thread = threading.Thread(target=run_generator)
+    thread.daemon = True
+    thread.start()
+
+
 def background_execution_loop(task_id, retry_delay=TASK_RETRY_DELAY):
     """Loop execution steps in background with self-correcting retry on failure.
-    In whatsapp mode, sends notifications for critical commands and asks for guidance on repeated failures.
+    In whatsapp mode, asks for guidance on repeated failures.
     On repeated failures, instructs the LLM to change approach instead of retrying the same way."""
 
     state = load_task_state(task_id)
@@ -1805,11 +1977,11 @@ def background_execution_loop(task_id, retry_delay=TASK_RETRY_DELAY):
         # Smart retry: keep existing plan and assess what was done
         if attempt > 0:
             state = load_task_state(task_id)
-            if state and state.get("status") in ("failed", "awaiting_intervention"):
+            if state and state.get("status") == "failed":
                 existing_plan = state.get("plan")
                 existing_steps = state.get("steps", [])
                 completed_summaries = state.get("completed_step_summaries", [])
-                last_step = state.get("step", 0)
+                last_step = state.get("current_step_idx", 0)
 
                 raw_detail = state.get("details") or ""
                 archived = {
@@ -1831,8 +2003,6 @@ def background_execution_loop(task_id, retry_delay=TASK_RETRY_DELAY):
                 state["last_user_intervention"] = None
                 state["current_streaming_response"] = ""
                 state["is_streaming"] = False
-                state["verification_report"] = None
-                state["verification_verdict"] = None
                 state["details"] = None
 
                 total_failures = len(failure_history)
@@ -1856,11 +2026,12 @@ def background_execution_loop(task_id, retry_delay=TASK_RETRY_DELAY):
                     failure_context = " | ".join(f"{s}: {e} [×{c}]" for (s, e), c in error_summary.items())
                     msg = (
                         f"FALHAS ANTERIORES ({total_failures} tentativas): {failure_context}\n\n"
-                        f"Você tentou implementar este plano {total_failures} vezes e falhou. Gere um plano COMPLETAMENTE NOVO.\n"
-                        f"O plano anterior NÃO funcionou. Crie uma abordagem diferente."
+                        f"Você tentou implementar este plano {total_failures} vezes e todas falharam. Gere um plano COMPLETAMENTE NOVO e MUITO MAIS SIMPLES.\n"
+                        f"O plano anterior NÃO funcionou. Crie uma abordagem completamente diferente.\n"
+                        f"CRÍTICO: Use no máximo 2-3 etapas. Mantenha tudo em UM arquivo único. NÃO crie arquivos separados.\n"
+                        f"Não use DDD, arquitetura em camadas, ou padrões complexos. Apenas implemente o essencial."
                     )
-                    if total_failures >= 5:
-                        msg += "\nConsidere usar uma estratégia mais simples com menos arquivos."
+                    state["complexity"] = "simple"
                     state["last_user_intervention"] = msg
                 elif existing_steps and existing_plan:
                     resume_step = min(last_step, len(existing_steps) - 1)
@@ -1868,13 +2039,55 @@ def background_execution_loop(task_id, retry_delay=TASK_RETRY_DELAY):
                     state["plan"] = existing_plan
                     state["steps"] = existing_steps
                     state["current_step_idx"] = resume_step if not all_done else len(existing_steps)
-                    state["step"] = resume_step if not all_done else len(existing_steps)
+                    state["step"] = 0
                     state["completed_step_summaries"] = completed_summaries
 
                     if all_done:
-                        state["stage"] = "verifying"
-                        state["messages"] = []
-                        state["proposed_tool"] = None
+                        planned = state.get("project_files_to_create", [])
+                        created = state.get("created_files", [])
+                        created_set = {f.get("path", "") for f in created}
+                        missing = [f for f in planned if f.get("path", "") not in created_set]
+
+                        if missing:
+                            missing_paths = [f.get("path") for f in missing]
+                            file_list = "\n".join(f"- {p}" for p in missing_paths)
+                            step_desc = (
+                                f"Create files still missing from the project structure:\n{file_list}\n\n"
+                                "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                            )
+                            state["project_structure"] = json.dumps(missing_paths)
+                            state["project_files_to_create"] = missing
+                            state["steps"].append(step_desc)
+                            state["current_step_idx"] = len(state["steps"]) - 1
+                            state["proposed_tool"] = {
+                                "name": "execute_step",
+                                "args": {
+                                    "step_num": len(state["steps"]),
+                                    "description": step_desc,
+                                },
+                            }
+                            state["status"] = "running"
+                            state["execution_log"].append({
+                                "step": state["step"],
+                                "role": "system",
+                                "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                            })
+                        else:
+                            state["stage"] = "completed"
+                            state["status"] = "completed"
+                            state["details"] = "All steps executed successfully."
+                            state["messages"] = []
+                            state["proposed_tool"] = None
+                            try:
+                                add_task_history(
+                                    MEMORY_DIR, state["task"], "SUCCESS",
+                                    "All steps executed successfully."
+                                )
+                            except Exception:
+                                pass
+                            if state.get("errors_encountered"):
+                                trigger_self_improvement(task_id, state)
+                            trigger_readme_generation(task_id, state)
                     else:
                         state["stage"] = "executing_steps"
                         completed_text = ""
@@ -1932,6 +2145,8 @@ First, explore what already exists:
 2. Read key files to understand current state
 3. Then continue implementing from where it left off
 
+IMPORTANT: 'write_file' automatically creates parent directories. You do NOT need to create directories first - just write files directly.
+
 Do NOT generate a new plan. Follow the existing plan.{failure_lessons}{approach_change}""",
                             }
                         ]
@@ -1952,17 +2167,6 @@ Do NOT generate a new plan. Follow the existing plan.{failure_lessons}{approach_
                 break
             state = load_task_state(task_id)
             if not state or state["status"] not in ("running", "processando"):
-                if whatsapp_mode and state and state["status"] == "awaiting_intervention":
-                    state["status"] = "running"
-                    state["details"] = "Auto-resumed from stuck state."
-                    state["execution_log"].append({
-                        "step": state.get("step", 0),
-                        "role": "system",
-                        "content": "🔄 Auto-resumed from awaiting_intervention.",
-                    })
-                    state["proposed_tool"] = None
-                    save_task_state(task_id, state)
-                    continue
                 break
 
             if not state.get("proposed_tool"):
@@ -1978,15 +2182,6 @@ Do NOT generate a new plan. Follow the existing plan.{failure_lessons}{approach_
 
             proposed_tool = state.get("proposed_tool")
             if proposed_tool:
-                if proposed_tool.get("name") == "run_command":
-                    command = proposed_tool.get("args", {}).get("command", "")
-                    if is_command_critical(command):
-                        if whatsapp_mode:
-                            _handle_critical_command_with_whatsapp(task_id, state, command)
-                        else:
-                            state["status"] = "awaiting_intervention"
-                            save_task_state(task_id, state)
-                        break
                 if proposed_tool.get("executed"):
                     del proposed_tool["executed"]
                     save_task_state(task_id, state)
@@ -1998,7 +2193,6 @@ Do NOT generate a new plan. Follow the existing plan.{failure_lessons}{approach_
             if not state or state["status"] in (
                 "completed",
                 "failed",
-                "awaiting_intervention",
             ):
                 break
 
@@ -2089,7 +2283,7 @@ def whatsapp_webhook():
     if not state:
         return jsonify({"error": "Task not found"}), 404
 
-    if state.get("status") not in ("awaiting_intervention", "failed", "running", "processando"):
+    if state.get("status") not in ("failed", "running", "processando"):
         return jsonify({"status": "task_not_pending", "current_status": state.get("status")}), 200
 
     try:
@@ -2211,7 +2405,7 @@ def get_dashboard():
         [
             t
             for t in tasks
-            if t["status"] in ("running", "awaiting_intervention", "processando")
+            if t["status"] in ("running", "processando")
         ]
     )
 
@@ -2228,6 +2422,28 @@ def get_dashboard():
             "tasks": sorted(tasks, key=lambda x: x["created_at"], reverse=True),
         }
     )
+
+
+def _detect_complexity(task: str) -> str:
+    """Auto-detect complexity based on task description.
+    Returns 'simple' for straightforward single-file tasks, 'complex' otherwise."""
+    t = task.lower().strip()
+    simple_keywords = [
+        "html", "css", "pagina", "page", "single", "único", "unico",
+        "js", "javascript", "simples", "simple", "one file",
+        "create a single", "criar um html", "criar uma pagina",
+    ]
+    char_count = len(t)
+    word_count = len(t.split())
+
+    for kw in simple_keywords:
+        if kw in t:
+            return "simple"
+
+    if char_count < 60 or word_count < 8:
+        return "simple"
+
+    return "complex"
 
 
 @app.route("/api/tasks", methods=["GET"])
@@ -2265,7 +2481,6 @@ def list_tasks():
                             "task": task_desc,
                             "status": "legacy",
                             "step": 0,
-                            "max_steps": 20,
                         }
                     )
     except Exception as e:
@@ -2281,11 +2496,10 @@ def create_task():
     if not task_prompt:
         return jsonify({"error": "Task prompt is required"}), 400
 
-    max_steps = int(data.get("max_steps", 20))
-    mode = data.get("mode", "step")  # 'step', 'auto', or 'auto-whatsapp'
+    mode = data.get("mode", "auto")  # 'auto' or 'auto-whatsapp'
     model_think = data.get("model_think", False)
     provider_type = data.get("provider_type", "llamacpp")
-    complexity = data.get("complexity", "complex")  # 'simple' or 'complex'
+    complexity = data.get("complexity", _detect_complexity(task_prompt))  # 'simple' or 'complex'
     default_retries = MAX_WHATSAPP_RETRIES if mode == "auto-whatsapp" else MAX_TASK_RETRIES
     max_retries = int(data.get("max_retries", default_retries))
     retry_delay = int(data.get("retry_delay", TASK_RETRY_DELAY))
@@ -2323,10 +2537,9 @@ def create_task():
         "task": task_prompt,
         "created_at": created_time_str,
         "mode": mode,
-        "status": "running",  # always start running; step mode will pause after first stage
+        "status": "running",  # always start running
         "stage": "generating_plan",
         "step": 0,
-        "max_steps": max_steps,
         "model_think": model_think,
         "provider_type": provider_type,
         "complexity": complexity,
@@ -2355,16 +2568,15 @@ def create_task():
         "current_streaming_response": "",
         "is_streaming": False,
         "current_command_output": "",
-        "verification_report": None,
-        "verification_verdict": None,
         "created_files": [],
+        "project_structure": None,
+        "project_files_to_create": [],
     }
 
     save_task_state(task_id, state)
     save_plan_overview(task_path, task_prompt, created_time_str)
 
-    # 5. Always auto-start first step in background (both auto, auto-whatsapp, and step modes).
-    # Step mode will pause at awaiting_intervention after the first stage completes.
+    # 5. Always auto-start first step in background.
     def _initial_step():
         try:
             run_agent_step_sync(task_id, action="approve")
@@ -2419,7 +2631,6 @@ def get_task(task_id):
                 "status": "legacy",
                 "stage": "legacy",
                 "step": 0,
-                "max_steps": 20,
                 "messages": [],
                 "execution_log": [],
                 "errors_encountered": [],
@@ -2435,8 +2646,6 @@ def get_task(task_id):
                 "current_streaming_response": "",
                 "is_streaming": False,
                 "current_command_output": "",
-                "verification_report": None,
-                "verification_verdict": None,
             }
         else:
             return jsonify({"error": "Task not found"}), 404
@@ -2451,6 +2660,14 @@ def get_task(task_id):
     state["current_streaming_response"] = state.get("current_streaming_response", "")
     state["is_streaming"] = state.get("is_streaming", False)
     state["current_command_output"] = state.get("current_command_output", "")
+    created_files = state.get("created_files", [])
+    project_files = state.get("project_files_to_create", [])
+    if project_files:
+        created_set = {f.get("path") for f in created_files}
+        completed = sum(1 for f in project_files if (f.get("path") if isinstance(f, dict) else f) in created_set)
+        state["files_progress"] = round(completed / len(project_files) * 100)
+    else:
+        state["files_progress"] = 100 if created_files else 0
     return jsonify(state)
 
 
@@ -2515,6 +2732,7 @@ def post_task_action(task_id):
 
         try:
             trigger_self_improvement(task_id, state)
+            trigger_readme_generation(task_id, state)
         except Exception:
             pass
 
@@ -2569,18 +2787,17 @@ def post_task_action(task_id):
         if state.get("status") in ("completed", "failed"):
             return jsonify(state)
 
-        if _is_auto_mode(state):
-            state["status"] = "running"
-            save_task_state(task_id, state)
-            _start_background_thread(task_id)
-        else:
-            state["status"] = "awaiting_intervention"
-            save_task_state(task_id, state)
+        state["status"] = "running"
+        save_task_state(task_id, state)
+        _start_background_thread(task_id)
 
         return jsonify(state)
 
     # Handle inject on completed/failed tasks: reset and re-run with new prompt
     if action == "inject" and state.get("status") in ("completed", "failed"):
+        # Preserve created_files across re-initializations
+        preserved_created_files = state.get("created_files", [])
+        
         state["proposed_tool"] = {
             "name": "generate_plan",
             "args": {},
@@ -2597,8 +2814,6 @@ def post_task_action(task_id):
         state["last_user_intervention"] = user_prompt
         state["current_streaming_response"] = ""
         state["is_streaming"] = False
-        state["verification_report"] = None
-        state["verification_verdict"] = None
         state["supervision_review_summary"] = None
         state["supervision_status"] = "idle"
         state["supervision_reason"] = None
@@ -2609,6 +2824,9 @@ def post_task_action(task_id):
         state["task"] = user_prompt
         state["provider_type"] = "llamacpp"
         state["llamacpp_url"] = get_provider_url("llamacpp")
+        state["created_files"] = preserved_created_files
+        state["project_structure"] = None
+        state["project_files_to_create"] = []
         state["execution_log"].append(
             {
                 "step": 0,
@@ -2616,10 +2834,7 @@ def post_task_action(task_id):
                 "content": f"🔄 Task re-initialized with new prompt: {user_prompt}",
             }
         )
-        if _is_auto_mode(state):
-            state["status"] = "running"
-        else:
-            state["status"] = "awaiting_intervention"
+        state["status"] = "running"
 
         # Delete old state file so save_task_state's completed/failed guard
         # does not override the status back to completed/failed
@@ -2628,15 +2843,14 @@ def post_task_action(task_id):
             os.remove(task_state_file)
         save_task_state(task_id, state)
 
-        # For auto mode, kick off the background loop
-        if _is_auto_mode(state):
-            def _auto_restart():
-                background_execution_loop(task_id)
-            ensure_task_stop_event(task_id)
-            thread = threading.Thread(target=_auto_restart)
-            thread.daemon = True
-            thread.start()
-            active_threads[task_id] = thread
+        # Kick off the background loop
+        def _auto_restart():
+            background_execution_loop(task_id)
+        ensure_task_stop_event(task_id)
+        thread = threading.Thread(target=_auto_restart)
+        thread.daemon = True
+        thread.start()
+        active_threads[task_id] = thread
 
         return jsonify(state)
 
@@ -2696,8 +2910,36 @@ def pause_task(task_id):
         return jsonify({"error": "Task not found"}), 404
 
     if state["status"] == "running":
-        state["status"] = "awaiting_intervention"
+        state["status"] = "failed"
+        state["details"] = "Task paused by user."
         save_task_state(task_id, state)
+
+    return jsonify(state)
+
+
+@app.route("/api/tasks/<task_id>/stop", methods=["POST"])
+def stop_task(task_id):
+    state = load_task_state(task_id)
+    if not state:
+        return jsonify({"error": "Task not found"}), 404
+
+    if state["status"] not in ("running", "processando"):
+        return jsonify({"error": "Task is not currently running"}), 400
+
+    state["status"] = "failed"
+    state["details"] = "Task stopped by user"
+    state["proposed_tool"] = None
+    save_task_state(task_id, state)
+
+    signal_task_stop(task_id)
+    try:
+        terminate_task_process_groups(task_id)
+    except Exception:
+        pass
+    try:
+        terminate_task_http_servers(task_id)
+    except Exception:
+        pass
 
     return jsonify(state)
 
@@ -2708,9 +2950,9 @@ def continue_task(task_id):
     if not state:
         return jsonify({"error": "Task not found"}), 404
 
-    # Only allow continue for failed or awaiting_intervention tasks
-    if state.get("status") not in ("failed", "awaiting_intervention"):
-        return jsonify({"error": "Only failed or paused tasks can be continued"}), 400
+    # Only allow continue for failed tasks
+    if state.get("status") != "failed":
+        return jsonify({"error": "Only failed tasks can be continued"}), 400
 
     # Kill any old thread (best-effort)
     if task_id in active_threads:
@@ -2720,7 +2962,7 @@ def continue_task(task_id):
     existing_plan = state.get("plan")
     existing_steps = state.get("steps", [])
     completed_summaries = state.get("completed_step_summaries", [])
-    last_step = state.get("step", 0)
+    last_step = state.get("current_step_idx", 0)
 
     # Archive failure info before clearing (truncate details to avoid context bloat)
     raw_detail = state.get("details") or ""
@@ -2745,8 +2987,6 @@ def continue_task(task_id):
     state["last_user_intervention"] = None
     state["current_streaming_response"] = ""
     state["is_streaming"] = False
-    state["verification_report"] = None
-    state["verification_verdict"] = None
     state["details"] = None
 
     if existing_steps and existing_plan:
@@ -2755,13 +2995,55 @@ def continue_task(task_id):
         state["plan"] = existing_plan
         state["steps"] = existing_steps
         state["current_step_idx"] = resume_step if not all_done else len(existing_steps)
-        state["step"] = resume_step if not all_done else len(existing_steps)
+        state["step"] = 0
         state["completed_step_summaries"] = completed_summaries
 
         if all_done:
-            state["stage"] = "verifying"
-            state["messages"] = []
-            state["proposed_tool"] = None
+            planned = state.get("project_files_to_create", [])
+            created = state.get("created_files", [])
+            created_set = {f.get("path", "") for f in created}
+            missing = [f for f in planned if f.get("path", "") not in created_set]
+
+            if missing:
+                missing_paths = [f.get("path") for f in missing]
+                file_list = "\n".join(f"- {p}" for p in missing_paths)
+                step_desc = (
+                    f"Create files still missing from the project structure:\n{file_list}\n\n"
+                    "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                )
+                state["project_structure"] = json.dumps(missing_paths)
+                state["project_files_to_create"] = missing
+                state["steps"].append(step_desc)
+                state["current_step_idx"] = len(state["steps"]) - 1
+                state["proposed_tool"] = {
+                    "name": "execute_step",
+                    "args": {
+                        "step_num": len(state["steps"]),
+                        "description": step_desc,
+                    },
+                }
+                state["status"] = "running"
+                state["execution_log"].append({
+                    "step": state["step"],
+                    "role": "system",
+                    "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                })
+            else:
+                state["stage"] = "completed"
+                state["status"] = "completed"
+                state["details"] = "All steps executed successfully."
+                state["messages"] = []
+                state["proposed_tool"] = None
+                try:
+                    add_task_history(
+                        MEMORY_DIR, state["task"], "SUCCESS",
+                        "All steps executed successfully."
+                    )
+                except Exception:
+                    pass
+                if state.get("errors_encountered"):
+                    trigger_self_improvement(state["task_id"], state)
+                trigger_readme_generation(state["task_id"], state)
         else:
             completed_text = ""
             if completed_summaries:
@@ -2788,6 +3070,8 @@ Your first action must be to explore what already exists:
 4. Determine what is still needed
 5. Continue implementing from where it left off
 
+IMPORTANT: 'write_file' automatically creates parent directories. You do NOT need to create directories first - just write files directly.
+
 Do NOT generate a new plan. Follow the existing plan above.""",
                 }
             ]
@@ -2809,6 +3093,9 @@ Do NOT generate a new plan. Follow the existing plan above.""",
         }
     )
 
+    # Clear stop signal so save_task_state and background loops work
+    task_stop_events.pop(task_id, None)
+
     # Remove the old state file so save_task_state's override logic
     # (which forces status back to the on-disk value for completed/failed tasks)
     # does not undo the status reset.
@@ -2818,13 +3105,12 @@ Do NOT generate a new plan. Follow the existing plan above.""",
 
     save_task_state(task_id, state)
 
-    mode = state.get("mode", "step")
+    mode = state.get("mode", "auto")
 
     def _continue_initial_step():
         try:
             run_agent_step_sync(task_id, action="approve")
-            if mode in ("auto", "auto-whatsapp"):
-                background_execution_loop(task_id)
+            background_execution_loop(task_id)
         except Exception as e:
             print(
                 f"[Continue] _continue_initial_step crashed for {task_id}: {e}",
@@ -3118,8 +3404,7 @@ def mark_incomplete_task_after_restart(task_id, state):
 def resume_incomplete_tasks():
     """
     Scans workspace for incomplete tasks and resumes them from checkpoints.
-    Auto-mode tasks with checkpoints are automatically restarted in the background.
-    Step-mode tasks are reset to awaiting_intervention for manual recovery.
+    All incomplete tasks with checkpoints are automatically restarted in the background.
     """
     print("[Startup] Scanning for incomplete tasks to resume...", flush=True)
     if not os.path.exists(WORKSPACE_DIR):
