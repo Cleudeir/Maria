@@ -12,6 +12,10 @@ export default defineConfig({
     port: 10011,
     proxy: {
       '/api': 'http://localhost:10010',
+      '/socket.io': {
+        target: 'http://localhost:10010',
+        ws: true,
+      },
     },
   },
 });

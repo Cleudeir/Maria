@@ -18,7 +18,7 @@ class MariaAgent:
         self,
         workspace_dir: str,
         memory_dir: str,
-        base_url: str = "http://localhost:11434",
+        base_url: Optional[str] = None,
         model_think: bool = False,
         provider_type: str = "llamacpp",
     ):
@@ -37,8 +37,8 @@ class MariaAgent:
     def generate_plan(self, task: str, stream_callback=None, complexity: str = "complex") -> str:
         return generate_plan(task, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback, complexity=complexity)
 
-    def generate_structure(self, plan: str, stream_callback=None) -> str:
-        return generate_structure(plan, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)
+    def generate_structure(self, plan: str, stream_callback=None, complexity: str = "complex") -> str:
+        return generate_structure(plan, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback, complexity=complexity)
 
     def regenerate_plan(self, plan: str, structure: str, stream_callback=None) -> str:
         return regenerate_plan(plan, structure, get_generate_fn=self.client.provider.generate, stream_callback=stream_callback)

@@ -2,14 +2,16 @@ import re
 from typing import List, Optional, Callable
 
 SIMPLE_PROMPT = """Read the plan below and break it into steps.
-For a simple task, create ONLY 1-2 steps maximum. Do not over-complicate.
+For a simple task, create ONLY 1 step maximum. Do NOT create multiple steps.
+The ONLY step should be: "Create the output file with the full implementation".
+Do NOT over-complicate.
 
 Plan:
 ---
 {plan}
 ---
 
-Response: Provide ONLY the numbered list of steps. No other text."""
+Response: Provide ONLY the numbered list of steps (1 line). No other text."""
 
 COMPLEX_PROMPT = """You are a technical project manager. Read the implementation plan below and break it down into a list of specific, sequential, actionable steps.
 Each step must:

@@ -102,7 +102,7 @@ class LlamaCppProvider(LLMProvider):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.model_think = model_think
-        self._temperature = 0.9
+        self._temperature = 0.2
         self._stop = None
         api_key = LLAMACPP_API_KEY
         self.headers = {"Content-Type": "application/json"}

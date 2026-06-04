@@ -18,13 +18,34 @@ Implementation Plan:
 
 Response: Output ONLY the PROJECT_STRUCTURE: line with the JSON array. No other text."""
 
+SIMPLE_PROMPT = """You are a project architect. Based on the implementation plan below, list all files that will be created.
+
+Rules:
+- This is a SIMPLE task. List ONLY 1-2 files maximum.
+- For HTML/JS/CSS tasks, output a SINGLE file (e.g., index.html)
+- Use a JSON array of relative file path strings
+
+Example output (for a simple HTML task):
+PROJECT_STRUCTURE: ["index.html"]
+
+Implementation Plan:
+---
+{plan}
+---
+
+Response: Output ONLY the PROJECT_STRUCTURE: line with the JSON array. No other text."""
+
 
 def generate_structure(
     plan: str,
     get_generate_fn,
     stream_callback: Optional[Callable[[str], None]] = None,
+    complexity: str = "complex",
 ) -> str:
-    prompt = PROMPT.format(plan=plan)
+    if complexity == "simple":
+        prompt = SIMPLE_PROMPT.format(plan=plan)
+    else:
+        prompt = PROMPT.format(plan=plan)
     system_text = "You are a project architect assistant."
 
     response = get_generate_fn(

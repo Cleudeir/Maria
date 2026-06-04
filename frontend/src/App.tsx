@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import { usePolling } from "./hooks/usePolling";
+import { useWebSocket } from "./hooks/useWebSocket";
 import Sidebar from "./components/Sidebar";
 import MobileTopbar from "./components/MobileTopbar";
 import HomeView from "./components/HomeView";
@@ -11,7 +11,7 @@ import LessonsModal from "./components/modals/LessonsModal";
 import FinishTaskModal from "./components/modals/FinishTaskModal";
 
 export default function App() {
-  usePolling();
+  useWebSocket();
 
   return (
     <div>

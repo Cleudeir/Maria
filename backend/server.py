@@ -14,6 +14,7 @@ from flask import (
     jsonify,
     send_file,
 )
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from bs4 import BeautifulSoup
 
 # Load .env file if present
@@ -97,6 +98,7 @@ def _compact_error_detail(detail: str) -> str:
 os.environ["MARIA_SERVER"] = "1"
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
@@ -155,6 +157,131 @@ def ensure_task_stop_event(task_id):
     if task_id not in task_stop_events:
         task_stop_events[task_id] = threading.Event()
     return task_stop_events[task_id]
+
+
+# ── WebSocket event handlers ──────────────────────────────────────────────
+
+@socketio.on("connect")
+def handle_connect():
+    emit("connected", {"status": "ok"})
+
+
+@socketio.on("disconnect")
+def handle_disconnect():
+    pass
+
+
+@socketio.on("subscribe_task")
+def handle_subscribe_task(data):
+    task_id = data.get("task_id")
+    if task_id:
+        join_room(f"task:{task_id}")
+        # Send current state immediately
+        state = load_task_state(task_id)
+        if state:
+            state.pop("messages", None)
+            state.pop("_recent_tool_calls", None)
+            state.pop("failure_history", None)
+            state["file_tree"] = build_output_file_tree(get_task_path(task_id))
+            state["current_streaming_response"] = state.get("current_streaming_response", "")
+            state["is_streaming"] = state.get("is_streaming", False)
+            state["current_command_output"] = state.get("current_command_output", "")
+            created_files = state.get("created_files", [])
+            project_files = state.get("project_files_to_create", [])
+            if project_files:
+                created_set = {f.get("path") for f in created_files}
+                completed = sum(1 for f in project_files if (f.get("path") if isinstance(f, dict) else f) in created_set)
+                state["files_progress"] = round(completed / len(project_files) * 100)
+            else:
+                state["files_progress"] = 100 if created_files else 0
+            emit("task_update", state)
+
+
+@socketio.on("unsubscribe_task")
+def handle_unsubscribe_task(data):
+    task_id = data.get("task_id")
+    if task_id:
+        leave_room(f"task:{task_id}")
+
+
+def emit_task_update(task_id):
+    """Broadcast task state change to all subscribers of that task room."""
+    state = load_task_state(task_id)
+    if not state:
+        return
+    # Strip heavy fields not needed for live updates
+    slim = {
+        "task_id": state.get("task_id"),
+        "task": state.get("task"),
+        "status": state.get("status"),
+        "step": state.get("step", 0),
+        "stage": state.get("stage"),
+        "stage_retries": state.get("stage_retries", 0),
+        "created_at": state.get("created_at"),
+        "details": state.get("details"),
+        "is_streaming": state.get("is_streaming", False),
+        "current_streaming_response": state.get("current_streaming_response", ""),
+        "current_command_output": state.get("current_command_output", ""),
+        "errors_encountered": state.get("errors_encountered", []),
+        "proposed_tool": state.get("proposed_tool"),
+        "supervision_status": state.get("supervision_status"),
+        "execution_log": state.get("execution_log", [])[-50:],
+        "created_files": state.get("created_files", []),
+        "project_files_to_create": state.get("project_files_to_create", []),
+        "files_progress": state.get("files_progress", 0),
+    }
+    socketio.emit("task_update", slim, room=f"task:{task_id}")
+
+
+def emit_tasks_list_update():
+    """Broadcast a lightweight tasks list update to all connected clients."""
+    tasks = []
+    try:
+        for folder in os.listdir(WORKSPACE_DIR):
+            if folder.startswith("task_") and os.path.isdir(os.path.join(WORKSPACE_DIR, folder)):
+                state = load_task_state(folder)
+                if state:
+                    tasks.append({
+                        "task_id": state.get("task_id", folder),
+                        "task": state.get("task", ""),
+                        "status": state.get("status", "unknown"),
+                        "step": state.get("step", 0),
+                        "created_at": state.get("created_at", ""),
+                    })
+    except Exception:
+        pass
+    tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    socketio.emit("tasks_list_update", tasks)
+
+
+def emit_dashboard_update():
+    """Broadcast dashboard stats to all connected clients."""
+    tasks = []
+    try:
+        for folder in os.listdir(WORKSPACE_DIR):
+            if folder.startswith("task_") and os.path.isdir(os.path.join(WORKSPACE_DIR, folder)):
+                state = load_task_state(folder)
+                if state:
+                    tasks.append({
+                        "task_id": state["task_id"],
+                        "created_at": state["created_at"],
+                        "task": state["task"],
+                        "status": state["status"],
+                    })
+    except Exception:
+        pass
+    lessons = load_lessons(MEMORY_DIR)
+    total = len(tasks)
+    success = len([t for t in tasks if t["status"] == "completed"])
+    running = len([t for t in tasks if t["status"] in ("running", "processando")])
+    socketio.emit("dashboard_update", {
+        "total_tasks": total,
+        "success_rate": round(success / total * 100, 1) if total > 0 else 0,
+        "completed": success,
+        "failed": len([t for t in tasks if t["status"] == "failed"]),
+        "running": running,
+        "lessons_count": len(lessons),
+    })
 
 
 def _is_whatsapp_mode(state: dict) -> bool:
@@ -334,6 +461,25 @@ def save_task_state(task_id, state):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2, ensure_ascii=False)
 
+    # Emit WebSocket update (throttled to max once per 300ms per task)
+    _maybe_emit_task_update(task_id)
+
+
+_emit_throttle: dict = {}
+
+def _maybe_emit_task_update(task_id: str):
+    """Emit task update throttled to avoid flooding clients."""
+    now = time.time()
+    last = _emit_throttle.get(task_id, 0)
+    if now - last < 0.3:
+        return
+    _emit_throttle[task_id] = now
+    try:
+        emit_task_update(task_id)
+        emit_tasks_list_update()
+    except Exception:
+        pass
+
 
 def format_task_prompt(prompt):
     return (
@@ -399,6 +545,7 @@ def save_execution_plan_steps(task_path, steps):
 
 def build_step_prompt(state):
     task_prompt = state.get("task", "")
+    complexity = state.get("complexity", "complex")
     prompt_lines = [
         "Use only the minimum context required for this step. Do not resend the entire conversation history.",
         "You are an agentic assistant executing a single step at a time.",
@@ -406,10 +553,18 @@ def build_step_prompt(state):
         "\n",
         "Task:\n" + task_prompt,
         f"\nCurrent step: {state.get('step', 0) + 1}.\n",
-        "ORGANIZATION: Split code into separate files by domain/responsibility. "
-        "Each file should contain related functions with a single purpose. "
-        "Each function must have one clear responsibility.",
     ]
+    if complexity != "simple":
+        prompt_lines.append(
+            "ORGANIZATION: Split code into separate files by domain/responsibility. "
+            "Each file should contain related functions with a single purpose. "
+            "Each function must have one clear responsibility."
+        )
+    else:
+        prompt_lines.append(
+            "Keep everything in a single file unless the task explicitly requires multiple files. "
+            "Do NOT over-engineer or create unnecessary files."
+        )
 
     if state.get("step_summaries"):
         prompt_lines.append("Previously completed step summaries:")
@@ -884,7 +1039,7 @@ def run_agent_step_sync(
             callback = _start_streaming()
             try:
                 project_structure = agent.generate_structure(
-                    state["plan"], stream_callback=callback
+                    state["plan"], stream_callback=callback, complexity=state.get("complexity", "complex")
                 )
             finally:
                 _stop_streaming()
@@ -1084,29 +1239,54 @@ def run_agent_step_sync(
                     missing = [f for f in planned if f.get("path", "") not in created_set]
 
                     if missing:
-                        missing_paths = [f.get("path") for f in missing]
-                        file_list = "\n".join(f"- {p}" for p in missing_paths)
-                        step_desc = (
-                            f"Create files still missing from the project structure:\n{file_list}\n\n"
-                            "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
-                        )
-                        state["project_structure"] = json.dumps(missing_paths)
-                        state["project_files_to_create"] = missing
-                        state["steps"].append(step_desc)
-                        state["current_step_idx"] = len(state["steps"]) - 1
-                        state["proposed_tool"] = {
-                            "name": "execute_step",
-                            "args": {
-                                "step_num": len(state["steps"]),
-                                "description": step_desc,
-                            },
-                        }
-                        state["status"] = "running"
-                        state["execution_log"].append({
-                            "step": state["step"],
-                            "role": "system",
-                            "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
-                        })
+                        missing_file_attempts = state.get("_missing_file_attempts", 0) + 1
+                        state["_missing_file_attempts"] = missing_file_attempts
+
+                        if missing_file_attempts > 2:
+                            state["stage"] = "completed"
+                            state["status"] = "completed"
+                            state["details"] = f"Parallel steps executed. {len(missing)} planned file(s) not created after {missing_file_attempts} attempts - completing anyway."
+                            state["proposed_tool"] = None
+                            state["messages"] = []
+                            state["execution_log"].append({
+                                "step": state["step"],
+                                "role": "system",
+                                "content": f"⚠️ {len(missing)} file(s) not created after {missing_file_attempts} attempts. Task completed anyway.",
+                            })
+                            try:
+                                add_task_history(
+                                    MEMORY_DIR, state["task"], "SUCCESS",
+                                    state["details"]
+                                )
+                            except Exception:
+                                pass
+                            if state.get("errors_encountered"):
+                                trigger_self_improvement(task_id, state)
+                            trigger_readme_generation(task_id, state)
+                        else:
+                            missing_paths = [f.get("path") for f in missing]
+                            file_list = "\n".join(f"- {p}" for p in missing_paths)
+                            step_desc = (
+                                f"Create files still missing from the project structure:\n{file_list}\n\n"
+                                "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                            )
+                            state["project_structure"] = json.dumps(missing_paths)
+                            state["project_files_to_create"] = missing
+                            state["steps"].append(step_desc)
+                            state["current_step_idx"] = len(state["steps"]) - 1
+                            state["proposed_tool"] = {
+                                "name": "execute_step",
+                                "args": {
+                                    "step_num": len(state["steps"]),
+                                    "description": step_desc,
+                                },
+                            }
+                            state["status"] = "running"
+                            state["execution_log"].append({
+                                "step": state["step"],
+                                "role": "system",
+                                "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                            })
                     else:
                         state["stage"] = "completed"
                         state["status"] = "completed"
@@ -1728,29 +1908,53 @@ def run_llm_for_tool(state, client):
                 missing = [f for f in planned if f.get("path", "") not in created_set]
 
                 if missing:
-                    missing_paths = [f.get("path") for f in missing]
-                    file_list = "\n".join(f"- {p}" for p in missing_paths)
-                    step_desc = (
-                        f"Create files still missing from the project structure:\n{file_list}\n\n"
-                        "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
-                    )
-                    state["project_structure"] = json.dumps(missing_paths)
-                    state["project_files_to_create"] = missing
-                    state["steps"].append(step_desc)
-                    state["current_step_idx"] = len(state["steps"]) - 1
-                    state["proposed_tool"] = {
-                        "name": "execute_step",
-                        "args": {
-                            "step_num": len(state["steps"]),
-                            "description": step_desc,
-                        },
-                    }
-                    state["status"] = "running"
-                    state["execution_log"].append({
-                        "step": state["step"],
-                        "role": "system",
-                        "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
-                    })
+                    missing_file_attempts = state.get("_missing_file_attempts", 0) + 1
+                    state["_missing_file_attempts"] = missing_file_attempts
+
+                    if missing_file_attempts > 2:
+                        state["stage"] = "completed"
+                        state["status"] = "completed"
+                        state["details"] = f"Steps executed. {len(missing)} planned file(s) not created after {missing_file_attempts} attempts - completing anyway."
+                        state["proposed_tool"] = None
+                        state["execution_log"].append({
+                            "step": state["step"],
+                            "role": "system",
+                            "content": f"⚠️ {len(missing)} file(s) not created after {missing_file_attempts} attempts. Task completed anyway.",
+                        })
+                        try:
+                            add_task_history(
+                                MEMORY_DIR, state["task"], "SUCCESS",
+                                state["details"]
+                            )
+                        except Exception:
+                            pass
+                        if state.get("errors_encountered"):
+                            trigger_self_improvement(state["task_id"], state)
+                        trigger_readme_generation(state["task_id"], state)
+                    else:
+                        missing_paths = [f.get("path") for f in missing]
+                        file_list = "\n".join(f"- {p}" for p in missing_paths)
+                        step_desc = (
+                            f"Create files still missing from the project structure:\n{file_list}\n\n"
+                            "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                        )
+                        state["project_structure"] = json.dumps(missing_paths)
+                        state["project_files_to_create"] = missing
+                        state["steps"].append(step_desc)
+                        state["current_step_idx"] = len(state["steps"]) - 1
+                        state["proposed_tool"] = {
+                            "name": "execute_step",
+                            "args": {
+                                "step_num": len(state["steps"]),
+                                "description": step_desc,
+                            },
+                        }
+                        state["status"] = "running"
+                        state["execution_log"].append({
+                            "step": state["step"],
+                            "role": "system",
+                            "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                        })
                 else:
                     state["stage"] = "completed"
                     state["status"] = "completed"
@@ -2049,29 +2253,54 @@ def background_execution_loop(task_id, retry_delay=TASK_RETRY_DELAY):
                         missing = [f for f in planned if f.get("path", "") not in created_set]
 
                         if missing:
-                            missing_paths = [f.get("path") for f in missing]
-                            file_list = "\n".join(f"- {p}" for p in missing_paths)
-                            step_desc = (
-                                f"Create files still missing from the project structure:\n{file_list}\n\n"
-                                "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
-                            )
-                            state["project_structure"] = json.dumps(missing_paths)
-                            state["project_files_to_create"] = missing
-                            state["steps"].append(step_desc)
-                            state["current_step_idx"] = len(state["steps"]) - 1
-                            state["proposed_tool"] = {
-                                "name": "execute_step",
-                                "args": {
-                                    "step_num": len(state["steps"]),
-                                    "description": step_desc,
-                                },
-                            }
-                            state["status"] = "running"
-                            state["execution_log"].append({
-                                "step": state["step"],
-                                "role": "system",
-                                "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
-                            })
+                            missing_file_attempts = state.get("_missing_file_attempts", 0) + 1
+                            state["_missing_file_attempts"] = missing_file_attempts
+
+                            if missing_file_attempts > 2:
+                                state["stage"] = "completed"
+                                state["status"] = "completed"
+                                state["details"] = f"Steps executed. {len(missing)} planned file(s) not created after {missing_file_attempts} attempts - completing anyway."
+                                state["messages"] = []
+                                state["proposed_tool"] = None
+                                state["execution_log"].append({
+                                    "step": state["step"],
+                                    "role": "system",
+                                    "content": f"⚠️ {len(missing)} file(s) not created after {missing_file_attempts} attempts. Task completed anyway.",
+                                })
+                                try:
+                                    add_task_history(
+                                        MEMORY_DIR, state["task"], "SUCCESS",
+                                        state["details"]
+                                    )
+                                except Exception:
+                                    pass
+                                if state.get("errors_encountered"):
+                                    trigger_self_improvement(task_id, state)
+                                trigger_readme_generation(task_id, state)
+                            else:
+                                missing_paths = [f.get("path") for f in missing]
+                                file_list = "\n".join(f"- {p}" for p in missing_paths)
+                                step_desc = (
+                                    f"Create files still missing from the project structure:\n{file_list}\n\n"
+                                    "Forneça conteúdo completo para cada arquivo. Não é necessário recriar arquivos já existentes."
+                                )
+                                state["project_structure"] = json.dumps(missing_paths)
+                                state["project_files_to_create"] = missing
+                                state["steps"].append(step_desc)
+                                state["current_step_idx"] = len(state["steps"]) - 1
+                                state["proposed_tool"] = {
+                                    "name": "execute_step",
+                                    "args": {
+                                        "step_num": len(state["steps"]),
+                                        "description": step_desc,
+                                    },
+                                }
+                                state["status"] = "running"
+                                state["execution_log"].append({
+                                    "step": state["step"],
+                                    "role": "system",
+                                    "content": f"📋 {len(missing)} arquivo(s) planejado(s) ainda não foram criados. Nova etapa adicionada para criá-los.",
+                                })
                         else:
                             state["stage"] = "completed"
                             state["status"] = "completed"
@@ -2366,12 +2595,7 @@ def whatsapp_webhook():
     })
 
 
-@app.route("/socket.io/", defaults={"path": ""})
-@app.route("/socket.io/<path:path>")
-def socket_io_fallback(path):
-    # Socket.IO client requests may hit this app even when Socket.IO is not supported.
-    # Return a no-content response so the server does not log repeated 404 errors.
-    return "", 204
+# Socket.IO is handled by flask-socketio directly
 
 
 @app.route("/api/dashboard", methods=["GET"])
@@ -2606,6 +2830,13 @@ def create_task():
     thread.start()
     active_threads[task_id] = thread
 
+    # Notify WebSocket clients
+    try:
+        emit_tasks_list_update()
+        emit_dashboard_update()
+    except Exception:
+        pass
+
     return jsonify(state)
 
 
@@ -2692,6 +2923,12 @@ def delete_task(task_id):
     active_threads.pop(task_id, None)
     task_stop_events.pop(task_id, None)
     task_locks.pop(task_id, None)
+    # Notify WebSocket clients
+    try:
+        emit_tasks_list_update()
+        emit_dashboard_update()
+    except Exception:
+        pass
     return jsonify({"success": True})
 
 
@@ -3509,4 +3746,4 @@ if __name__ == "__main__":
     # Resume any tasks that were left incomplete before starting Flask
     resume_incomplete_tasks()
 
-    app.run(host="0.0.0.0", port=port, debug=debug_mode, use_reloader=False)
+    socketio.run(app, host="0.0.0.0", port=port, debug=debug_mode, use_reloader=False)

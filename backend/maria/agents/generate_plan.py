@@ -4,11 +4,12 @@ SIMPLE_PROMPT = (
     "Implementation task: {task}\n\n"
     "IMPORTANT: Do exactly what is asked. Do NOT over-engineer.\n"
     "- Create only the files that are strictly necessary\n"
+    "- For HTML/CSS/JS tasks, create a SINGLE self-contained HTML file with inline CSS and JS\n"
     "- Do not create extra folders, configs, or utilities unless explicitly asked\n"
     "- Keep everything in a single file if possible\n"
     "- No TDD, no tests, no architecture patterns unless asked\n"
     "- Just implement what the user requested\n"
-    "- CRITICAL: The plan must describe the APPROACH only. NEVER include code, pseudocode, or implementation text in the plan."
+    "- CRITICAL: The plan must describe the APPROACH as a single-file implementation. NEVER include code, pseudocode, or implementation text in the plan."
 )
 
 COMPLEX_PROMPT = (
@@ -23,7 +24,7 @@ COMPLEX_PROMPT = (
     "- CRITICAL: The plan must describe the APPROACH only. NEVER include code, pseudocode, or implementation text in the plan."
 )
 
-SIMPLE_SYSTEM = "You are a direct, no-nonsense coding assistant. Do exactly what is asked without over-engineering."
+SIMPLE_SYSTEM = "You are a direct, no-nonsense coding assistant. Do exactly what is asked without over-engineering. For web tasks, always create a single self-contained HTML file with inline CSS and JavaScript."
 COMPLEX_SYSTEM = "You are a senior software engineer designing a well-structured implementation plan."
 
 

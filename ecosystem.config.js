@@ -24,14 +24,12 @@ module.exports = {
     },
     {
       name: "maria-frontend",
-      script: "pnpm",
-      args: "dev --host --port 10011",
+      script: "./node_modules/vite/bin/vite.js",
+      args: "--host --port 10011",
       cwd: __dirname + "/frontend",
       exec_mode: "fork",
       autorestart: true,
-      watch: true,
-      watch_delay: 1000,
-      ignore_watch: ["node_modules", "dist"],
+      watch: false,
     },
   ],
 };

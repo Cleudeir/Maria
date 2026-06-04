@@ -41,6 +41,9 @@ interface AppContextValue extends AppState {
   batchDeleteTasks: () => Promise<void>;
   sendChatPrompt: (prompt: string) => Promise<void>;
   closeEditor: () => void;
+  setTasksFromWS: (tasks: AppState['tasks']) => void;
+  setTaskDetailsFromWS: (task: Task) => void;
+  setDashboardFromWS: (stats: DashboardStats) => void;
 }
 
 const defaultDashboard: DashboardStats = { total_tasks: 0, success_rate: 0, running: 0, lessons_count: 0 };
@@ -205,6 +208,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [currentTaskId, fetchTaskDetails, loadTasksList]);
 
+  const setTasksFromWS = useCallback((newTasks: AppState['tasks']) => {
+    const active = newTasks.find(t => t.task_id === currentTaskIdRef.current);
+    const newStatus = active?.status ?? null;
+    setActiveTaskStatus(prev => {
+      if (prev === newStatus) return prev;
+      return newStatus;
+    });
+    setTasks(newTasks);
+  }, []);
+
+  const setTaskDetailsFromWS = useCallback((task: Task) => {
+    const json = JSON.stringify(task);
+    if (json === lastDetailsJsonRef.current) return;
+    lastDetailsJsonRef.current = json;
+    setCurrentTask(task);
+  }, []);
+
+  const setDashboardFromWS = useCallback((stats: DashboardStats) => {
+    setDashboard(stats);
+  }, []);
+
   return (
     <AppContext.Provider value={{
       currentTaskId, activeTaskStatus, currentTab, editorTab,
@@ -221,6 +245,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectTaskById, stopTask, continueTask,
       deleteTask: deleteTaskFn, batchDeleteTasks,
       sendChatPrompt, closeEditor,
+      setTasksFromWS, setTaskDetailsFromWS, setDashboardFromWS,
     }}>
       {children}
     </AppContext.Provider>

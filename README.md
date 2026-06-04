@@ -12,7 +12,6 @@ Maria is a self-improving agentic SLM (Small Language Model) system that autonom
 - **Task isolation**: Each task runs in its own workspace directory
 - **Checkpoint & resume**: Tasks can be resumed from checkpoints after interruption
 - **Web UI**: Flask-based dashboard for task management and monitoring
-- **CLI**: Full command-line interface for all operations
 
 ## Requirements
 
@@ -36,82 +35,6 @@ python server.py
 
 The web UI is available at `http://localhost:5002`.
 
-### CLI
-
-```bash
-python cli.py <command> [options]
-```
-
-#### Commands
-
-| Command | Description |
-|---------|-------------|
-| `create "task"` | Create a new task |
-| `list` | List all tasks |
-| `get <task_id>` | Get task details |
-| `action <task_id> <action>` | Execute action (inject, resume, resume_auto, force_complete) |
-| `pause <task_id>` | Pause a running task |
-| `continue <task_id>` | Continue a failed task |
-| `delete <task_id>` | Delete a task |
-| `files <task_id> <view\|edit\|list>` | Manage task files |
-| `memory <prompt\|lessons>` | Manage system memory |
-| `dashboard` | Show dashboard statistics |
-
-#### Examples
-
-```bash
-# Create a task and wait for completion
-python cli.py create "Build a snake game in Python" --mode auto --wait
-
-# Create a task (auto mode)
-python cli.py create "Create a REST API with Flask" --mode auto
-
-# List all tasks
-python cli.py list
-
-# Get task details (raw JSON)
-python cli.py get task_20260521_120000 --raw
-
-# Inject user instruction
-python cli.py action task_20260521_120000 inject --user-prompt "Use pytest for testing"
-
-# Pause a running task
-python cli.py pause task_20260521_120000
-
-# Resume auto mode
-python cli.py action task_20260521_120000 resume_auto --wait
-
-# Continue a failed task
-python cli.py continue task_20260521_120000
-
-# View task files
-python cli.py files task_20260521_120000 view plan/plan.md
-
-# List task output files
-python cli.py files task_20260521_120000 list
-
-# Edit a file in task output
-python cli.py files task_20260521_120000 edit output/main.py --content "print('hello')"
-
-# Get system prompt
-python cli.py memory prompt --get
-
-# Set system prompt
-python cli.py memory prompt --set "You are Maria, an agentic coding assistant."
-
-# Get lessons
-python cli.py memory lessons --get
-
-# Show dashboard
-python cli.py dashboard
-```
-
-### Direct Agent (no server)
-
-```bash
-python main.py "Build a calculator in Python" --max-steps 20 --workspace workspace --memory memory
-```
-
 ## Architecture
 
 ### Stages
@@ -128,8 +51,6 @@ python main.py "Build a calculator in Python" --max-steps 20 --workspace workspa
 | File | Description |
 |------|-------------|
 | `server.py` | Flask web server with API routes |
-| `cli.py` | Command-line interface |
-| `main.py` | Direct agent execution (no server) |
 | `maria/agent.py` | MariaAgent class with stage methods |
 | `maria/llm.py` | LLM client abstraction |
 | `maria/tools.py` | Tool executor (file ops, commands) |
@@ -180,17 +101,6 @@ Environment variables:
 | `MARIA_SERVER` | - | Set to `1` to bypass security prompts |
 | `FLASK_ENV` | `development` | Flask environment |
 | `DEBUG` | `1` | Enable debug mode |
-
-CLI options for `create`:
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--max-steps` | 20 | Maximum execution steps |
-| `--mode` | auto | `auto` or `auto-whatsapp` |
-| `--model-think` | true | Enable model thinking |
-| `--no-model-think` | - | Disable model thinking |
-| `--provider` | llamacpp | Provider type |
-| `--wait` | false | Wait for completion |
 
 ## Tests
 

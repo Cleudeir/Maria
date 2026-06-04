@@ -12,7 +12,7 @@ class LLMClient:
     def __init__(
         self,
         provider: Optional[LLMProvider] = None,
-        base_url: str = "http://localhost:11434",
+        base_url: Optional[str] = None,
         model: str = "qwen3.5:4b",
         model_think: bool = False,
         provider_type: str = "llamacpp",
@@ -20,11 +20,12 @@ class LLMClient:
         if provider is not None:
             self.provider = provider
         else:
+            kwargs = {"model": model, "model_think": model_think}
+            if base_url is not None:
+                kwargs["base_url"] = base_url
             self.provider = create_provider(
                 provider_type,
-                base_url=base_url,
-                model=model,
-                model_think=model_think,
+                **kwargs,
             )
 
     @property
