@@ -1,8 +1,8 @@
 import re
 from typing import List, Dict, Any, Optional
-from maria.llm import LLMClient
-from maria.memory import load_system_prompt, load_lessons, add_lesson, save_system_prompt, save_lessons
-from maria.agents.utils import parse_self_improvement_response, parse_compacted_lessons_response
+from agentic.llm import LLMClient
+from agentic.memory import load_system_prompt, load_lessons, add_lesson, save_system_prompt, save_lessons
+from agentic.agents.utils import parse_self_improvement_response, parse_compacted_lessons_response
 
 
 class SelfImprovementAgent:

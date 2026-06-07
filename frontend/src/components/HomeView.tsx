@@ -12,7 +12,7 @@ export default function HomeView() {
   return (
     <div className="home-view" id="home-view">
       <div className="home-logo">🤖</div>
-      <div className="home-title">Maria Console</div>
+      <div className="home-title">Agentic Console</div>
       <div className="home-subtitle">Welcome to the self-improving coding assistant dashboard. Run, monitor, and interact with agent tasks.</div>
       <div className="stats-grid">
         <div className="stat-card">

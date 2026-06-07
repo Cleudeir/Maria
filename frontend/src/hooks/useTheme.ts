@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 
 export function useTheme() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return (localStorage.getItem('maria-theme') as 'light' | 'dark') ?? 'light';
+    return (localStorage.getItem('agentic-theme') as 'light' | 'dark') ?? 'light';
   });
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('maria-theme', theme);
+    localStorage.setItem('agentic-theme', theme);
   }, [theme]);
 
   const toggle = useCallback(() => {

@@ -14,7 +14,7 @@ if BACKEND_DIR not in sys.path:
 
 os.environ["MARIA_BENCHMARK"] = "1"
 
-from maria.agents import MariaAgent
+from agentic.agents import MariaAgent
 import benchmark.test_cases as test_cases
 
 def load_tasks(tasks_file):
@@ -76,8 +76,8 @@ def run_task(task, workspace_base, memory_dir, base_url):
             verification_error = f"Verification error: {e}\n{traceback.format_exc()}"
             print(f"❌ Verification FAILED with error: {verification_error}")
             
-    # Load task_state.json if it exists to get more details (e.g. tool execution errors, steps count)
-    state_path = os.path.join(task_workspace, "task_state.json")
+    # Load task.json if it exists to get more details (e.g. tool execution errors, steps count)
+    state_path = os.path.join(task_workspace, "task.json")
     steps_count = 0
     errors_encountered = []
     
@@ -239,7 +239,7 @@ def main():
                 except Exception as e:
                     verification_error = f"Error: {e}"
             
-            state_path = os.path.join(task_workspace, "task_state.json")
+            state_path = os.path.join(task_workspace, "task.json")
             agent_completed = False
             if os.path.exists(state_path):
                 try:

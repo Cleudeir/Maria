@@ -8,7 +8,7 @@ export default function MobileTopbar() {
         <i className="fa-solid fa-bars"></i>
       </button>
       <div className="brand">
-        <div className="brand-logo"><i className="fa-solid fa-brain-circuit"></i> MARIA</div>
+        <div className="brand-logo"><i className="fa-solid fa-brain-circuit"></i> AGENTIC</div>
         <div className="brand-badge">slm</div>
       </div>
     </div>

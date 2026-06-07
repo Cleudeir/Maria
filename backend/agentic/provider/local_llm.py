@@ -3,8 +3,8 @@ import requests
 import threading
 from typing import List, Dict, Any, Optional, Callable
 
-from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format, ContextExceededError, RetryableError
-from maria.provider.base import strip_thinking_process, extract_reasoning
+from agentic.provider.base import LLMProvider, format_messages_to_prompt as shared_format, ContextExceededError, RetryableError
+from agentic.provider.base import strip_thinking_process, extract_reasoning
 
 
 _thread_local = threading.local()

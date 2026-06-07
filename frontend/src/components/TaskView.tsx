@@ -1,56 +1,85 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import type { TabName, EditorTab } from '../types';
+import type { TabName } from '../types';
 import StreamingTab from './StreamingTab';
 import FilesTab from './FilesTab';
 import AgentTab from './AgentTab';
 import WorkspaceTab from './WorkspaceTab';
-import LogsTab from './LogsTab';
+import TimelineTab from './TimelineTab';
 import ServerList from './ServerList';
-import SupervisionBanner from './SupervisionBanner';
-
-const _taskRenderCount = { current: 0 };
+import { api } from '../api/client';
 
 export default function TaskView() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const renderCount = ++_taskRenderCount.current;
   const {
     currentTask, currentTab, setCurrentTab,
-    selectTaskById, fetchTaskDetails, activeTaskStatus,
-    loadTasksList, stopTask,
+    selectTaskById, stopTask,
+    setEditingFilePath, setEditorTab,
   } = useApp();
+  const fetchedIdRef = useRef<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log(`[TaskView] #${renderCount} MOUNT id=${id} taskId=${currentTask?.task_id}`);
-    if (id) {
-      selectTaskById(id);
+    if (id && id !== fetchedIdRef.current) {
+      fetchedIdRef.current = id;
+      setLoadError(null);
+      selectTaskById(id).catch((err) => {
+        console.error('[TaskView] selectTaskById failed', err);
+        setLoadError(err?.message || String(err));
+      });
     }
-    return () => console.log(`[TaskView] #${renderCount} UNMOUNT`);
-  }, [id, selectTaskById, currentTask?.task_id]);
+  }, [id, selectTaskById]);
 
   const handleTabClick = useCallback((tab: TabName) => {
     setCurrentTab(tab);
   }, [setCurrentTab]);
 
-  const task = currentTask;
-  if (!task) {
-    console.log(`[TaskView] #${renderCount} NO TASK`);
-    return <div className="task-view" id="task-view"></div>;
+  const handleRetry = useCallback(() => {
+    fetchedIdRef.current = null;
+    setLoadError(null);
+    if (id) selectTaskById(id);
+  }, [id, selectTaskById]);
+
+  const handlePreview = useCallback(async () => {
+    if (!currentTask) return;
+    try {
+      const { html_files } = await api.getHtmlFiles(currentTask.task_id);
+      if (html_files.length === 0) return;
+      setEditingFilePath(`output/${html_files[0]}`);
+      setEditorTab('preview');
+      setCurrentTab('workspace');
+    } catch {}
+  }, [currentTask, setEditingFilePath, setEditorTab, setCurrentTab]);
+
+  if (!currentTask) {
+    return (
+      <div className="task-view task-view--loading" id="task-view">
+        {loadError ? (
+          <>
+            <i className="fa-solid fa-circle-exclamation task-view-error-icon"></i>
+            <div className="task-view-error-text">Failed to load task: {loadError}</div>
+            <button className="btn-action" onClick={handleRetry}>
+              <i className="fa-solid fa-rotate"></i> Retry
+            </button>
+          </>
+        ) : (
+          <>
+            <i className="fa-solid fa-spinner fa-spin task-view-spinner"></i>
+            <div>Loading task {id ? `(${id})` : ''}…</div>
+          </>
+        )}
+      </div>
+    );
   }
 
-  console.log(`[TaskView] #${renderCount} RENDER step=${task.step} stage=${task.stage} status=${task.status}`);
-
-  const statusLabel = (s: string) => s.replace(/_/g, ' ');
-  const statusClass = (s: string) => `task-header-badge status-${s}`;
-
+  const task = currentTask;
   const isComplete = task.status === 'completed';
   const isRunning = task.status === 'running' || task.status === 'processando';
   const isFailed = task.status === 'failed';
 
   const tabButtons: Array<{ key: TabName; icon: string; label: string }> = [
-    { key: 'logs', icon: 'fa-scroll', label: 'Logs' },
+    { key: 'logs', icon: 'fa-stream', label: 'Timeline' },
     { key: 'streaming', icon: 'fa-bolt', label: 'Streaming' },
     { key: 'created', icon: 'fa-file-code', label: 'Files' },
     { key: 'agent', icon: 'fa-robot', label: 'Agent' },
@@ -63,26 +92,30 @@ export default function TaskView() {
         <div className="task-header-left">
           <div className="task-header-title" id="active-task-desc">{task.task}</div>
           <div className="task-header-meta">
-            <span className={statusClass(task.status)}>{statusLabel(task.status)}</span>
+            <span className={`task-header-badge status-${task.status}`}>
+              {task.status.replace(/_/g, ' ')}
+            </span>
             <span className="task-header-step" id="active-task-step">Step: {task.step}</span>
-            {task.files_progress != null ? (
+            {task.files_progress != null && (
               <span className="task-header-progress" id="task-files-progress">
                 <i className="fa-solid fa-file"></i> {task.files_progress}%
               </span>
-            ) : null}
+            )}
           </div>
         </div>
         <div className="task-header-actions">
-          {isRunning ? (
+          {isRunning && (
             <button className="btn-action btn-stop" id="btn-stop-task" onClick={stopTask}>
               <i className="fa-solid fa-stop"></i> Stop
             </button>
-          ) : null}
-          <button className="btn-action" id="btn-preview-html" style={{ display: isComplete ? 'inline-flex' : 'none' }}>
+          )}
+          <button
+            className="btn-action"
+            id="btn-preview-html"
+            style={{ display: isComplete ? 'inline-flex' : 'none' }}
+            onClick={handlePreview}
+          >
             <i className="fa-solid fa-eye"></i> Preview
-          </button>
-          <button className="btn-action" id="btn-test-server" style={{ display: 'none' }}>
-            <i className="fa-solid fa-server"></i> Test Server
           </button>
         </div>
         <ServerList taskId={task.task_id} />
@@ -98,40 +131,51 @@ export default function TaskView() {
                 data-tab={t.key}
                 onClick={() => handleTabClick(t.key)}
               >
-                <i className={`fa-solid ${t.icon}`}></i><span className="tab-label"> {t.label}</span>
-                {t.key === 'agent' && isFailed ? (
+                <i className={`fa-solid ${t.icon}`}></i>
+                <span className="tab-label"> {t.label}</span>
+                {t.key === 'agent' && isFailed && (
                   <i className="fa-solid fa-circle-exclamation tab-error-badge" id="agent-error-badge"></i>
-                ) : null}
+                )}
               </button>
             ))}
           </div>
 
-          <div className={`tab-content${currentTab === 'logs' ? ' active' : ''}`} id="tab-logs">
-            <LogsTab logs={task.execution_log ?? []} commandOutput={task.current_command_output} />
-          </div>
-          <div className={`tab-content${currentTab === 'streaming' ? ' active' : ''}`} id="tab-streaming">
-            <StreamingTab
-              isStreaming={task.is_streaming ?? false}
-              content={task.current_streaming_response}
-            />
-          </div>
-          <div className={`tab-content${currentTab === 'created' ? ' active' : ''}`} id="tab-created">
-            <FilesTab
-              files={task.created_files ?? []}
-              toCreateFiles={task.project_files_to_create ?? []}
-              filesProgress={task.files_progress ?? 0}
-            />
-          </div>
-          <div className={`tab-content${currentTab === 'agent' ? ' active' : ''}`} id="tab-agent">
-            <AgentTab task={task} />
-          </div>
-          <div className={`tab-content${currentTab === 'workspace' ? ' active' : ''}`} id="tab-workspace">
-            <WorkspaceTab taskId={task.task_id} fileTree={task.file_tree} />
-          </div>
+          {currentTab === 'logs' && (
+            <div className="tab-content active" id="tab-logs" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <TimelineTab logs={task.execution_log ?? []} />
+            </div>
+          )}
+          {currentTab === 'streaming' && (
+            <div className="tab-content active" id="tab-streaming" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <StreamingTab
+                isStreaming={task.is_streaming ?? false}
+                content={task.current_streaming_response}
+              />
+            </div>
+          )}
+          {currentTab === 'created' && (
+            <div className="tab-content active" id="tab-created" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <FilesTab
+                files={task.created_files ?? []}
+                toCreateFiles={task.project_files_to_create ?? []}
+                filesProgress={task.files_progress ?? 0}
+              />
+            </div>
+          )}
+          {currentTab === 'agent' && (
+            <div className="tab-content active" id="tab-agent" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <AgentTab task={task} />
+            </div>
+          )}
+          {currentTab === 'workspace' && (
+            <div className="tab-content active" id="tab-workspace" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <WorkspaceTab taskId={task.task_id} fileTree={task.file_tree} />
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="task-chat-bar" id="task-chat-bar" style={{ display: 'flex' }}>
+      <div className="task-chat-bar" id="task-chat-bar">
         <ChatBar />
       </div>
     </div>
@@ -143,8 +187,9 @@ function ChatBar() {
   const { sendChatPrompt } = useApp();
 
   const handleSend = () => {
-    if (!value.trim()) return;
-    sendChatPrompt(value.trim());
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    sendChatPrompt(trimmed);
     setValue('');
   };
 

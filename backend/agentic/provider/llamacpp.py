@@ -6,7 +6,7 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
 
-from maria.provider.base import LLMProvider, format_messages_to_prompt as shared_format, ContextExceededError, RetryableError
+from agentic.provider.base import LLMProvider, format_messages_to_prompt as shared_format, ContextExceededError, RetryableError
 
 
 _thread_local = threading.local()

@@ -2,7 +2,7 @@ import json
 import logging
 from typing import List, Dict, Optional
 
-from maria.runaway import is_runaway_response, truncate_runaway
+from agentic.runaway import is_runaway_response, truncate_runaway
 
 logger = logging.getLogger(__name__)
 

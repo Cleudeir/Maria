@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import logging
 from typing import List, Dict, Any, Optional, Callable
 
-from maria.compact_context import compact_messages, total_tokens
+from agentic.compact_context import compact_messages, total_tokens
 
 logger = logging.getLogger(__name__)
 

@@ -57,7 +57,7 @@ export default function NewTaskModal() {
         </div>
         {error ? <div className="form-error" id="new-task-error">{error}</div> : null}
         <div className="form-group">
-          <label className="form-label">What should Maria do?</label>
+          <label className="form-label">What should Agentic do?</label>
           <textarea className="form-textarea" placeholder="e.g. Write a Python function to compute the N-th prime number..." value={prompt} onChange={e => setPrompt(e.target.value)}></textarea>
         </div>
         <div className="form-group">

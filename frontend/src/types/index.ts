@@ -35,6 +35,67 @@ export interface ToCreateFile {
   path: string;
 }
 
+export interface YamlProject {
+  name: string;
+  description: string;
+  language: string;
+  framework: string;
+}
+
+export interface ParameterSpec {
+  name: string;
+  type: string;
+  required: boolean;
+  default?: unknown;
+  description: string;
+}
+
+export interface FunctionSpecV2 {
+  name: string;
+  description: string;
+  inputs: ParameterSpec[];
+  outputs: ParameterSpec[];
+  calls: string[];
+}
+
+export interface ImportSpecV2 {
+  module: string;
+  items: string[];
+  external: boolean;
+}
+
+export interface ConstantSpecV2 {
+  name: string;
+  type: string;
+  value: string;
+  description: string;
+}
+
+export interface FileSpecV2 {
+  path: string;
+  description: string;
+  type: 'module' | 'component' | 'config' | 'test' | 'util' | 'entrypoint' | 'style' | 'static';
+  imports: ImportSpecV2[];
+  functions: FunctionSpecV2[];
+  constants: ConstantSpecV2[];
+  dependencies: string[];
+}
+
+export interface Manifest {
+  project: YamlProject;
+  files: FileSpecV2[];
+  entrypoint: string;
+}
+
+export interface GenerationResult {
+  path: string;
+  success: boolean;
+  error: string | null;
+  content: string | null;
+  functions_generated: string[];
+  warning?: string;
+}
+
 export interface Task {
   task_id: string;
   task: string;
@@ -58,6 +119,12 @@ export interface Task {
   created_files?: CreatedFile[];
   project_files_to_create?: ToCreateFile[];
   files_progress?: number;
+  plan_yaml?: string | null;
+  plan_json?: string | null;
+  manifest?: Manifest | null;
+  generation_order?: string[];
+  current_file_idx?: number;
+  files_generated?: GenerationResult[];
 }
 
 export interface DashboardStats {

@@ -7,7 +7,7 @@ export default function Sidebar() {
   const {
     tasks, currentTaskId, batchSelectionMode, selectedTasksForDelete,
     toggleBatchSelectionMode, toggleTaskSelection, clearSelectedTasks,
-    batchDeleteTasks, selectTaskById, loadTasksList,
+    batchDeleteTasks, loadTasksList,
   } = useApp();
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
@@ -34,7 +34,6 @@ export default function Sidebar() {
   };
 
   const handleTaskClick = (taskId: string) => {
-    selectTaskById(taskId);
     navigate(`/task/${taskId}`);
     closeSidebar();
   };
@@ -49,7 +48,7 @@ export default function Sidebar() {
       <div className="sidebar" id="sidebar">
         <div className="sidebar-header">
           <div className="brand">
-            <div className="brand-logo"><i className="fa-solid fa-brain-circuit"></i> MARIA</div>
+            <div className="brand-logo"><i className="fa-solid fa-brain-circuit"></i> AGENTIC</div>
             <div className="brand-badge">slm</div>
           </div>
           <button className="btn-sidebar-close" id="btn-sidebar-close" aria-label="Close sidebar" onClick={closeSidebar}>

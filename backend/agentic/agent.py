@@ -1,5 +1,5 @@
 # Compatibility module. Real implementation is in maria/agents/
-from maria.agents import (
+from agentic.agents import (
     MariaAgent,
     parse_agent_response,
     parse_agent_responses,

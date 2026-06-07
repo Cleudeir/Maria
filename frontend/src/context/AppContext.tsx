@@ -60,7 +60,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [logAutoScroll, setLogAutoScroll] = useState(true);
   const [expandedFolders] = useState<Set<string>>(new Set());
   const [batchSelectionMode, setBatchSelectionMode] = useState(false);
-  const [selectedTasksForDelete] = useState<Set<string>>(new Set());
+  const [selectedTasksForDelete, setSelectedTasksForDelete] = useState<Set<string>>(new Set());
   const [tasks, setTasks] = useState<AppState['tasks']>([]);
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
   const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
@@ -85,22 +85,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const toggleBatchSelectionModeFn = useCallback(() => {
     setBatchSelectionMode(prev => {
-      if (prev) selectedTasksForDelete.clear();
+      if (prev) setSelectedTasksForDelete(new Set());
       return !prev;
     });
-  }, [selectedTasksForDelete]);
+  }, []);
 
   const toggleTaskSelection = useCallback((taskId: string) => {
-    if (selectedTasksForDelete.has(taskId)) {
-      selectedTasksForDelete.delete(taskId);
-    } else {
-      selectedTasksForDelete.add(taskId);
-    }
-  }, [selectedTasksForDelete]);
+    setSelectedTasksForDelete(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }, []);
 
   const clearSelectedTasksFn = useCallback(() => {
-    selectedTasksForDelete.clear();
-  }, [selectedTasksForDelete]);
+    setSelectedTasksForDelete(new Set());
+  }, []);
 
   const refreshDashboard = useCallback(async () => {
     try {

@@ -8,16 +8,13 @@ export default function StreamingTab({ isStreaming, content }: { isStreaming: bo
     );
   }
 
-  let text = content ?? 'Waiting for generation...';
-  if (text.length > 200) {
-    text = '...' + text.slice(-200);
-  }
+  const text = content ?? 'Waiting for generation...';
 
   return (
     <div className="streaming-panel" id="streaming-panel">
       <div className="streaming-header">
         <i className="fa-solid fa-circle-notch fa-spin"></i>
-        <span>Generating response (last 200 chars shown)</span>
+        <span>Generating response</span>
       </div>
       <div className="streaming-body" id="streaming-content">
         {text.split('\n').map((line, i) => <span key={i}>{line}<br /></span>)}

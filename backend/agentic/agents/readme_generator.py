@@ -23,7 +23,7 @@ class ReadmeGenerator:
         for root, dirs, files in os.walk(directory):
             dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".venv", "venv")]
             for f in files:
-                if f.startswith(".") or f in ("task_state.json", "task_info.html"):
+                if f.startswith(".") or f in "task.json":
                     continue
                 rel_path = os.path.relpath(os.path.join(root, f), self.output_dir)
                 if rel_path == "README.md":

@@ -6,7 +6,7 @@ import signal
 import sys
 import threading
 import time
-from maria.security import is_path_safe
+from agentic.security import is_path_safe
 
 BINARY_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
@@ -271,7 +271,7 @@ class ToolExecutor:
                     rel_path = os.path.relpath(dir_path, target_dir)
                     result.append(f"[DIR] {rel_path}")
                 for f in files:
-                    if f.startswith(".") or f in ("task_state.json", "task_info.html"):
+                    if f.startswith(".") or f in "task.json":
                         continue
                     file_path = os.path.join(root, f)
                     rel_path = os.path.relpath(file_path, target_dir)
@@ -295,7 +295,7 @@ class ToolExecutor:
             return f"Error: Path '{path}' is a directory, not a file."
 
         filename = os.path.basename(target_file)
-        if filename in ("task_state.json", "task_info.html"):
+        if filename in "task.json":
             return "Error: Access Denied. Internal system file."
 
         if is_binary_file(target_file):
@@ -335,7 +335,7 @@ class ToolExecutor:
             return "Error: Access Denied. Output files must be saved within the 'output' directory or its subfolders."
 
         filename = os.path.basename(target_file)
-        if filename in ("task_state.json", "task_info.html"):
+        if filename in "task.json":
             return "Error: Access Denied. Internal system file."
 
         try:
@@ -384,8 +384,7 @@ class ToolExecutor:
                 ]
                 for file in files:
                     if file.startswith(".") or file in (
-                        "task_state.json",
-                        "task_info.html",
+                        "task.json",
                     ):
                         continue
                     file_path = os.path.join(root, file)
@@ -480,7 +479,7 @@ class ToolExecutor:
             return f"Error: Path '{path}' is a directory, not a file."
 
         filename = os.path.basename(target_file)
-        if filename in ("task_state.json", "task_info.html"):
+        if filename in "task.json":
             return "Error: Access Denied. Internal system file."
 
         try:
@@ -513,7 +512,7 @@ class ToolExecutor:
             return f"Error: Path '{path}' is a directory, not a file."
 
         filename = os.path.basename(target_file)
-        if filename in ("task_state.json", "task_info.html"):
+        if filename in "task.json":
             return "Error: Access Denied. Internal system file."
 
         output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
@@ -553,7 +552,7 @@ class ToolExecutor:
             return f"Error: Path '{path}' is a directory, not a file."
 
         filename = os.path.basename(target_file)
-        if filename in ("task_state.json", "task_info.html"):
+        if filename in "task.json":
             return "Error: Access Denied. Internal system file."
 
         output_dir = os.path.abspath(os.path.join(self.workspace_dir, "output"))
@@ -764,3 +763,58 @@ class ToolExecutor:
                 f"- server_id={s['server_id']} port={s['port']} path={s['path']} url={s['url']}"
             )
         return "Active HTTP servers:\n" + "\n".join(lines)
+
+    def run_install_command(
+        self,
+        command: str,
+        working_dir: str = "output",
+        timeout_seconds: int = 90,
+    ) -> str:
+        """Run a single whitelisted install command (npm/npx/pnpm/yarn/pip).
+
+        Allowed managers: npm, npx, pnpm, yarn, pip, pip3, python -m pip.
+        The working directory defaults to the task's `output/` folder. Path
+        traversal (`..`) is rejected. Use this to install dependencies declared
+        in the agent's plan.
+        """
+        from agentic.agents.install_runner import (
+            is_command_allowed,
+            run_install_commands,
+        )
+
+        if not command or not command.strip():
+            return "Error: command is required."
+
+        if ".." in (working_dir or "").replace("\\", "/").split("/"):
+            return "Error: '..' not allowed in working_dir."
+
+        target_dir, error = self._resolve_output_path(working_dir or "output")
+        if error:
+            return error
+        if not os.path.isdir(target_dir):
+            return f"Error: working_dir '{working_dir}' is not a directory."
+
+        ok, reason = is_command_allowed(command)
+        if not ok:
+            return f"Error: {reason}"
+
+        report = run_install_commands(
+            commands=[command],
+            working_dir=target_dir,
+            progress_callback=self.output_callback,
+            cmd_timeout_s=int(timeout_seconds) if timeout_seconds else 90,
+        )
+        result = report.results[0]
+        body = (
+            f"command: {result.command}\n"
+            f"returncode: {result.returncode}\n"
+            f"duration_ms: {result.duration_ms}\n"
+            f"success: {result.success}\n"
+        )
+        if result.stdout:
+            body += f"\n--- stdout ---\n{result.stdout}\n"
+        if result.stderr:
+            body += f"\n--- stderr ---\n{result.stderr}\n"
+        if result.error:
+            body += f"\nerror: {result.error}\n"
+        return body

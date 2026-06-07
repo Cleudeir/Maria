@@ -2,27 +2,43 @@ import os
 import logging
 from typing import List, Dict, Any, Optional, Callable
 
-from maria.provider import create_provider, LLMProvider
-from maria.compact_context import compact_messages, total_tokens
+from agentic.provider import create_provider, LLMProvider
+from agentic.compact_context import compact_messages, total_tokens
+from agentic.provider.opencode import OPENCODE_DEFAULT_MODEL
 
 logger = logging.getLogger(__name__)
 
 
 class LLMClient:
+    """Thin wrapper around an LLMProvider that adds context compaction.
+
+    Supported provider_type values:
+      - "llamacpp" / "llamacpp_2": local self-hosted llama.cpp servers
+      - "local_llm": a generic OpenAI-compatible local endpoint
+      - "opencode": opencode.ai/zen chat-completions (uses OPENCODE_API_KEY)
+
+    For "opencode", the default model is "deepseek-v4-flash". Pass `model` to
+    override it.
+    """
+
     def __init__(
         self,
         provider: Optional[LLMProvider] = None,
         base_url: Optional[str] = None,
-        model: str = "qwen3.5:4b",
+        model: Optional[str] = None,
         model_think: bool = False,
         provider_type: str = "llamacpp",
     ):
         if provider is not None:
             self.provider = provider
         else:
-            kwargs = {"model": model, "model_think": model_think}
+            kwargs: Dict[str, Any] = {"model_think": model_think}
             if base_url is not None:
                 kwargs["base_url"] = base_url
+            if model is not None:
+                kwargs["model"] = model
+            elif provider_type == "opencode":
+                kwargs["model"] = OPENCODE_DEFAULT_MODEL
             self.provider = create_provider(
                 provider_type,
                 **kwargs,

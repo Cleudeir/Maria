@@ -2,7 +2,7 @@ import json
 import re
 from typing import List, Dict, Tuple, Any
 
-from maria.runaway import is_runaway_response
+from agentic.runaway import is_runaway_response
 
 
 def _extract_json_object(text: str, start_idx: int) -> str:
