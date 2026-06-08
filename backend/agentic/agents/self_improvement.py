@@ -6,9 +6,9 @@ from agentic.agents.utils import parse_self_improvement_response, parse_compacte
 
 
 class SelfImprovementAgent:
-    def __init__(self, memory_dir: str, base_url: Optional[str] = None, model_think: bool = False):
+    def __init__(self, memory_dir: str, base_url: Optional[str] = None, model_think: bool = False, provider_type: str = "llamacpp"):
         self.memory_dir = memory_dir
-        self.client = LLMClient(base_url=base_url, model_think=model_think, provider_type="llamacpp")
+        self.client = LLMClient(base_url=base_url, model_think=model_think, provider_type=provider_type)
 
     def improve(
         self,

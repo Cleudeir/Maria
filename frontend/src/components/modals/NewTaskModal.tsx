@@ -78,6 +78,7 @@ export default function NewTaskModal() {
           <select className="form-select" value={provider} onChange={e => setProvider(e.target.value)}>
             <option value="llamacpp">LlamaCpp - Node 1 (192.168.20.180)</option>
             <option value="llamacpp_2">LlamaCpp - Node 2 (192.168.20.181)</option>
+            <option value="opencode">OpenCode (deepseek-v4-flash via opencode.ai)</option>
           </select>
         </div>
         <div className="modal-footer">

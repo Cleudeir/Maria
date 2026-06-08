@@ -2302,7 +2302,9 @@ def trigger_self_improvement(task_id, state):
     def run_improvement():
         try:
             meta_agent = SelfImprovementAgent(
-                MEMORY_DIR, base_url=state.get("llamacpp_url", LLAMACPP_URL)
+                MEMORY_DIR,
+                base_url=state.get("llamacpp_url", LLAMACPP_URL),
+                provider_type=state.get("provider_type", "llamacpp"),
             )
             meta_agent.improve(
                 state["task"], state["execution_log"], state["errors_encountered"]
