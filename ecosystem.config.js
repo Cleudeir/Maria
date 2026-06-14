@@ -13,7 +13,7 @@ module.exports = {
     {
       name: "agentic-frontend",
       script: "./node_modules/vite/bin/vite.js",
-      args: "--host --port 10011",
+      args: "--port 10011",
       cwd: __dirname + "/frontend",
       exec_mode: "fork",
       autorestart: true,
